@@ -1,0 +1,13 @@
+[tools]
+python = "3.11"
+shellcheck = "0.10.0"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+
+[tasks.check]
+description = "Run linters (pylint and shellcheck)"
+run = [
+  "pylint clean_history.py",
+  "shellcheck zsh-clean-history.plugin.zsh"
+]

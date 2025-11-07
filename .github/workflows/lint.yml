@@ -27,3 +27,6 @@ jobs:
 
     - name: Run pylint
       run: pylint clean_history.py
+
+    - name: Run shellcheck
+      run: shellcheck zsh-clean-history.plugin.zsh
