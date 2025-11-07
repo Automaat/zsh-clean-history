@@ -7,7 +7,11 @@ disable=
     missing-function-docstring,
     missing-class-docstring,
     too-few-public-methods,
-    invalid-name
+    invalid-name,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-nested-blocks
 
 [FORMAT]
 max-line-length=100
