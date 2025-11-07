@@ -8,7 +8,6 @@ Smart history cleaner that removes likely typos based on:
 import argparse
 import re
 import shutil
-import sys
 from pathlib import Path
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
@@ -179,7 +178,7 @@ def main():
     duplicates_count = sum(1 for r in removal_reasons.values() if r == "Duplicate")
 
     if args.dry_run or not args.quiet:
-        print(f"\nStats:")
+        print("\nStats:")
         print(f"  Total commands: {len(all_lines)}")
         print(f"  Unique commands: {len(seen_commands)}")
         print(f"  Successful: {sum(successful_cmds.values())}")
