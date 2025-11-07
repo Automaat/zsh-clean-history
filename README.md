@@ -16,7 +16,7 @@ Smart zsh history cleanup plugin that automatically removes typos and failed com
 
 ```bash
 # Add to ~/.zshrc
-zplug "automaat/zsh-clean-history", from:github
+zplug "automaat/zsh-clean-history", from:github, at:main
 ```
 
 ### Using zinit
