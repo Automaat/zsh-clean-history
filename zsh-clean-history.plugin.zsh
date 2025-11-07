@@ -15,22 +15,37 @@ ZSH_CLEAN_HISTORY_RARE_THRESHOLD=${ZSH_CLEAN_HISTORY_RARE_THRESHOLD:-3}
 setopt EXTENDED_HISTORY
 setopt INC_APPEND_HISTORY
 
-# Capture exit codes in history
-_zsh_clean_history_last_exit=0
+# Store exit codes in separate file
+typeset -g _zsh_clean_history_exit_file="${HOME}/.zsh_history_exits"
+typeset -gA _zsh_clean_history_exits
 
-_zsh_clean_history_precmd() {
-    _zsh_clean_history_last_exit=$?
+_zsh_clean_history_load_exits() {
+    [[ -f "$_zsh_clean_history_exit_file" ]] || return
+    local line timestamp cmd exit_code
+    while IFS=: read -r timestamp exit_code; do
+        _zsh_clean_history_exits[$timestamp]=$exit_code
+    done < "$_zsh_clean_history_exit_file"
 }
 
-_zsh_clean_history_addhistory() {
-    print -sr -- "${1%%$'\n'}###EXIT:${_zsh_clean_history_last_exit}"
-    return 1  # Prevent default history add
+_zsh_clean_history_save_exit() {
+    local exit_code=$?
+    local cmd="${1%%$'\n'}"
+    local timestamp=$EPOCHSECONDS
+
+    # Append to exit codes file
+    echo "${timestamp}:${exit_code}" >> "$_zsh_clean_history_exit_file"
+    _zsh_clean_history_exits[$timestamp]=$exit_code
+
+    # Let default history mechanism work
+    return 0
 }
+
+# Load existing exit codes
+_zsh_clean_history_load_exits
 
 # Hook into zsh
 autoload -Uz add-zsh-hook
-add-zsh-hook precmd _zsh_clean_history_precmd
-add-zsh-hook zshaddhistory _zsh_clean_history_addhistory
+add-zsh-hook zshaddhistory _zsh_clean_history_save_exit
 
 # Command to run cleanup manually
 clean-history() {

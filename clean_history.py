@@ -14,31 +14,37 @@ from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 
 HISTORY_FILE = Path.home() / ".zsh_history"
+EXIT_FILE = Path.home() / ".zsh_history_exits"
 BACKUP_SUFFIX = ".backup"
 
 
+def load_exit_codes():
+    """Load exit codes from separate file."""
+    exit_codes = {}
+    if not EXIT_FILE.exists():
+        return exit_codes
+
+    with open(EXIT_FILE, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            line = line.strip()
+            if ':' in line:
+                timestamp, exit_code = line.split(':', 1)
+                try:
+                    exit_codes[timestamp] = int(exit_code)
+                except ValueError:
+                    pass
+    return exit_codes
+
+
 def parse_history_line(line):
-    """Parse a zsh history line with optional exit code."""
-    # Format: : timestamp:duration;command###EXIT:code
-    # Or old format: : timestamp:duration;command
+    """Parse a zsh history line."""
+    # Format: : timestamp:duration;command
     match = re.match(r': (\d+):\d+;(.+)', line)
     if not match:
-        return None, None, None
+        return None, None
 
-    timestamp, rest = match.groups()
-
-    # Check for exit code
-    if "###EXIT:" in rest:
-        command, exit_code = rest.rsplit("###EXIT:", 1)
-        try:
-            exit_code = int(exit_code.strip())
-        except ValueError:
-            exit_code = None
-    else:
-        command = rest
-        exit_code = None
-
-    return timestamp, command.strip(), exit_code
+    timestamp, command = match.groups()
+    return timestamp, command.strip()
 
 
 def similarity(a, b):
@@ -91,6 +97,9 @@ def main():
         if not args.quiet:
             print(f"Created backup: {backup_path}")
 
+    # Load exit codes
+    exit_codes = load_exit_codes()
+
     # Parse history
     successful_cmds = Counter()
     failed_cmds = Counter()
@@ -102,10 +111,12 @@ def main():
             line = line.rstrip('\n')
             all_lines.append(line)
 
-            timestamp, command, exit_code = parse_history_line(line)
+            timestamp, command = parse_history_line(line)
             if command:
                 cmd_to_lines[command].append(idx)
 
+                # Look up exit code by timestamp
+                exit_code = exit_codes.get(timestamp)
                 if exit_code == 0:
                     successful_cmds[command] += 1
                 elif exit_code is not None and exit_code != 0:
@@ -170,7 +181,8 @@ def main():
             print(f"\nRemoved {removed_count} lines:")
             sample_indices = sorted(lines_to_remove)[:20]
             for idx in sample_indices:
-                _, cmd, exit_code = parse_history_line(all_lines[idx])
+                timestamp, cmd = parse_history_line(all_lines[idx])
+                exit_code = exit_codes.get(timestamp)
                 reason = removal_reasons.get(idx, "unknown")
                 exit_str = f" (exit: {exit_code})" if exit_code is not None else ""
                 print(f"  - {cmd}{exit_str} [{reason}]")
@@ -181,7 +193,8 @@ def main():
         print(f"\nWould remove {removed_count} lines:")
         sample_indices = sorted(lines_to_remove)[:20]
         for idx in sample_indices:
-            _, cmd, exit_code = parse_history_line(all_lines[idx])
+            timestamp, cmd = parse_history_line(all_lines[idx])
+            exit_code = exit_codes.get(timestamp)
             reason = removal_reasons.get(idx, "unknown")
             exit_str = f" (exit: {exit_code})" if exit_code is not None else ""
             print(f"  - {cmd}{exit_str} [{reason}]")
