@@ -105,6 +105,7 @@ def main():
     failed_cmds = Counter()
     all_lines = []
     cmd_to_lines = defaultdict(list)
+    seen_commands = {}  # Track first occurrence of each command
 
     with open(HISTORY_FILE, 'r', encoding='utf-8', errors='ignore') as f:
         for idx, line in enumerate(f):
@@ -114,6 +115,10 @@ def main():
             timestamp, command = parse_history_line(line)
             if command:
                 cmd_to_lines[command].append(idx)
+
+                # Track first occurrence for deduplication
+                if command not in seen_commands:
+                    seen_commands[command] = idx
 
                 # Look up exit code by timestamp
                 exit_code = exit_codes.get(timestamp)
@@ -125,6 +130,15 @@ def main():
     # Find commands to remove
     lines_to_remove = set()
     removal_reasons = {}
+
+    # Strategy 0: Remove duplicate commands (keep only first occurrence)
+    for command, indices in cmd_to_lines.items():
+        if len(indices) > 1:
+            first_idx = seen_commands[command]
+            for idx in indices:
+                if idx != first_idx:
+                    lines_to_remove.add(idx)
+                    removal_reasons[idx] = "Duplicate"
 
     # Strategy 1: Remove failed commands similar to successful ones
     for failed_cmd, fail_count in failed_cmds.items():
@@ -162,12 +176,15 @@ def main():
 
     # Show stats
     removed_count = len(lines_to_remove)
+    duplicates_count = sum(1 for r in removal_reasons.values() if r == "Duplicate")
 
     if args.dry_run or not args.quiet:
         print(f"\nStats:")
         print(f"  Total commands: {len(all_lines)}")
+        print(f"  Unique commands: {len(seen_commands)}")
         print(f"  Successful: {sum(successful_cmds.values())}")
         print(f"  Failed: {sum(failed_cmds.values())}")
+        print(f"  Duplicates: {duplicates_count}")
         print(f"  Would remove: {removed_count}" if args.dry_run else f"  Removed: {removed_count}")
 
     # Write cleaned history (unless dry run)
