@@ -5,6 +5,10 @@ shellcheck = "0.10.0"
 [env]
 _.python.venv = { path = ".venv", create = true }
 
+[tasks.test]
+description = "Run tests"
+run = "python -m unittest test_clean_history.py -v"
+
 [tasks.check]
 description = "Run linters (pylint and shellcheck)"
 run = [
