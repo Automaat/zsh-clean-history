@@ -7,14 +7,11 @@ _.python.venv = { path = ".venv", create = true }
 
 [tasks.install]
 description = "Install Python dependencies"
-run = "pip install -r requirements-dev.txt"
+run = ["pip install --upgrade pip", "pip install -r requirements-dev.txt"]
 
 [tasks.test]
 description = "Run tests"
-run = [
-  "pip install --upgrade pip",
-  "python -m unittest discover -v"
-  ]
+run = "python -m unittest discover -v"
 
 [tasks.check]
 description = "Run linters (pylint and shellcheck)"

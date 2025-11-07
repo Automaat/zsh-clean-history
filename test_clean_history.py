@@ -2,14 +2,14 @@
 """Tests for clean_history.py"""
 
 import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from collections import defaultdict, Counter
 from unittest.mock import patch, mock_open
 from clean_history import (
     parse_history_line,
     similarity,
     get_base_command,
     load_exit_codes,
+    find_duplicate_indices,
 )
 
 
@@ -76,6 +76,49 @@ class TestGetBaseCommand(unittest.TestCase):
         self.assertEqual(result, "")
 
 
+class TestFindDuplicateIndices(unittest.TestCase):
+    """Test find_duplicate_indices function"""
+
+    def test_no_duplicates(self):
+        """Test when there are no duplicates"""
+        cmd_to_lines = defaultdict(list)
+        cmd_to_lines["ls -la"] = [0]
+        cmd_to_lines["git status"] = [1]
+        seen_commands = {"ls -la": 0, "git status": 1}
+
+        result = find_duplicate_indices(cmd_to_lines, seen_commands)
+        self.assertEqual(result, set())
+
+    def test_single_duplicate(self):
+        """Test removing single duplicate command"""
+        cmd_to_lines = defaultdict(list)
+        cmd_to_lines["ls -la"] = [0, 5]
+        seen_commands = {"ls -la": 0}
+
+        result = find_duplicate_indices(cmd_to_lines, seen_commands)
+        self.assertEqual(result, {5})
+
+    def test_multiple_duplicates(self):
+        """Test removing multiple duplicate instances"""
+        cmd_to_lines = defaultdict(list)
+        cmd_to_lines["ls -la"] = [0, 5, 10, 15]
+        seen_commands = {"ls -la": 0}
+
+        result = find_duplicate_indices(cmd_to_lines, seen_commands)
+        self.assertEqual(result, {5, 10, 15})
+
+    def test_mixed_commands(self):
+        """Test with mix of duplicate and unique commands"""
+        cmd_to_lines = defaultdict(list)
+        cmd_to_lines["ls -la"] = [0, 5, 10]
+        cmd_to_lines["git status"] = [1]
+        cmd_to_lines["pwd"] = [2, 7]
+        seen_commands = {"ls -la": 0, "git status": 1, "pwd": 2}
+
+        result = find_duplicate_indices(cmd_to_lines, seen_commands)
+        self.assertEqual(result, {5, 7, 10})
+
+
 class TestLoadExitCodes(unittest.TestCase):
     """Test load_exit_codes function"""
 
@@ -119,28 +162,18 @@ class TestIntegration(unittest.TestCase):
 
     def test_duplicate_removal(self):
         """Test that duplicates are identified correctly"""
-        from collections import defaultdict
-
         cmd_to_lines = defaultdict(list)
         cmd_to_lines["ls -la"] = [0, 5, 10]
         cmd_to_lines["git status"] = [1]
 
         seen_commands = {"ls -la": 0, "git status": 1}
-        lines_to_remove = set()
 
-        for command, indices in cmd_to_lines.items():
-            if len(indices) > 1:
-                first_idx = seen_commands[command]
-                for idx in indices:
-                    if idx != first_idx:
-                        lines_to_remove.add(idx)
+        lines_to_remove = find_duplicate_indices(cmd_to_lines, seen_commands)
 
         self.assertEqual(lines_to_remove, {5, 10})
 
     def test_failed_command_similarity(self):
         """Test failed command similarity detection"""
-        from collections import Counter
-
         failed_cmds = Counter({"git statsu": 1})
         successful_cmds = Counter({"git status": 10})
 

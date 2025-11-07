@@ -56,6 +56,26 @@ def get_base_command(cmd):
     return cmd.split()[0] if cmd.split() else cmd
 
 
+def find_duplicate_indices(cmd_to_lines, seen_commands):
+    """Find indices of duplicate commands, keeping only first occurrence.
+
+    Args:
+        cmd_to_lines: Dict mapping commands to list of line indices
+        seen_commands: Dict mapping commands to their first occurrence index
+
+    Returns:
+        Set of line indices to remove
+    """
+    lines_to_remove = set()
+    for command, indices in cmd_to_lines.items():
+        if len(indices) > 1:
+            first_idx = seen_commands[command]
+            for idx in indices:
+                if idx != first_idx:
+                    lines_to_remove.add(idx)
+    return lines_to_remove
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Smart zsh history cleaner - removes typos and failed commands"
@@ -131,13 +151,10 @@ def main():
     removal_reasons = {}
 
     # Strategy 0: Remove duplicate commands (keep only first occurrence)
-    for command, indices in cmd_to_lines.items():
-        if len(indices) > 1:
-            first_idx = seen_commands[command]
-            for idx in indices:
-                if idx != first_idx:
-                    lines_to_remove.add(idx)
-                    removal_reasons[idx] = "Duplicate"
+    duplicate_indices = find_duplicate_indices(cmd_to_lines, seen_commands)
+    for idx in duplicate_indices:
+        lines_to_remove.add(idx)
+        removal_reasons[idx] = "Duplicate"
 
     # Strategy 1: Remove failed commands similar to successful ones
     for failed_cmd, fail_count in failed_cmds.items():
