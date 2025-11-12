@@ -103,6 +103,11 @@ def main():
         action="store_true",
         help="Minimal output",
     )
+    parser.add_argument(
+        "--remove-rare",
+        action="store_true",
+        help="Remove rare command variants (default: keep them)",
+    )
 
     args = parser.parse_args()
 
@@ -164,31 +169,32 @@ def main():
             if get_base_command(success_cmd) == base_cmd:
                 sim = similarity(failed_cmd, success_cmd)
 
-                if sim >= similarity_threshold and success_count > fail_count:
+                if similarity_threshold <= sim < 1.0 and success_count > fail_count:
                     for idx in cmd_to_lines[failed_cmd]:
                         lines_to_remove.add(idx)
                         removal_reasons[idx] = f"Failed similar to '{success_cmd}'"
                     break
 
-    # Strategy 2: Remove rare commands similar to common ones
-    all_cmds = Counter()
-    all_cmds.update(successful_cmds)
-    all_cmds.update(failed_cmds)
+    # Strategy 2: Remove rare commands similar to common ones (only if --remove-rare)
+    if args.remove_rare:
+        all_cmds = Counter()
+        all_cmds.update(successful_cmds)
+        all_cmds.update(failed_cmds)
 
-    for rare_cmd, rare_count in all_cmds.items():
-        if rare_count <= rare_threshold:
-            base_cmd = get_base_command(rare_cmd)
+        for rare_cmd, rare_count in all_cmds.items():
+            if rare_count <= rare_threshold:
+                base_cmd = get_base_command(rare_cmd)
 
-            for common_cmd, common_count in all_cmds.items():
-                if common_count > rare_count * 3 and get_base_command(common_cmd) == base_cmd:
-                    sim = similarity(rare_cmd, common_cmd)
+                for common_cmd, common_count in all_cmds.items():
+                    if common_count > rare_count * 3 and get_base_command(common_cmd) == base_cmd:
+                        sim = similarity(rare_cmd, common_cmd)
 
-                    if sim >= similarity_threshold:
-                        for idx in cmd_to_lines[rare_cmd]:
-                            if idx not in lines_to_remove:
-                                lines_to_remove.add(idx)
-                                removal_reasons[idx] = f"Rare variant of '{common_cmd}'"
-                        break
+                        if sim >= similarity_threshold:
+                            for idx in cmd_to_lines[rare_cmd]:
+                                if idx not in lines_to_remove:
+                                    lines_to_remove.add(idx)
+                                    removal_reasons[idx] = f"Rare variant of '{common_cmd}'"
+                            break
 
     # Show stats
     removed_count = len(lines_to_remove)
