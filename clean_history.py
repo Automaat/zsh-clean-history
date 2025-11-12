@@ -167,8 +167,17 @@ def main():
 
         for success_cmd, success_count in successful_cmds.items():
             if get_base_command(success_cmd) == base_cmd:
-                sim = similarity(failed_cmd, success_cmd)
+                # Check if failed command is a prefix of successful one
+                if success_cmd.startswith(failed_cmd) and success_cmd != failed_cmd:
+                    # Ensure it's a word boundary (space or end of string after prefix)
+                    if len(success_cmd) > len(failed_cmd) and success_count > fail_count:
+                        for idx in cmd_to_lines[failed_cmd]:
+                            lines_to_remove.add(idx)
+                            removal_reasons[idx] = f"Failed prefix of '{success_cmd}'"
+                        break
 
+                # Check similarity
+                sim = similarity(failed_cmd, success_cmd)
                 if similarity_threshold <= sim < 1.0 and success_count > fail_count:
                     for idx in cmd_to_lines[failed_cmd]:
                         lines_to_remove.add(idx)

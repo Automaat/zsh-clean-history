@@ -208,6 +208,25 @@ class TestIntegration(unittest.TestCase):
 
         self.assertFalse(should_remove)
 
+    def test_failed_prefix_removed(self):
+        """Test that failed commands that are prefixes of successful ones are removed"""
+        failed_cmds = Counter({"mise ins": 2})
+        successful_cmds = Counter({"mise install": 10})
+
+        should_remove = False
+        fail_count = failed_cmds["mise ins"]
+        success_count = successful_cmds["mise install"]
+
+        for failed_cmd in failed_cmds:
+            for success_cmd in successful_cmds:
+                if get_base_command(failed_cmd) == get_base_command(success_cmd):
+                    if success_cmd.startswith(failed_cmd) and success_cmd != failed_cmd:
+                        if len(success_cmd) > len(failed_cmd) and success_count > fail_count:
+                            should_remove = True
+                            break
+
+        self.assertTrue(should_remove)
+
 
 if __name__ == '__main__':
     unittest.main()
