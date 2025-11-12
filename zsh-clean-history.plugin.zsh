@@ -29,23 +29,31 @@ _zsh_clean_history_load_exits() {
 
 _zsh_clean_history_save_exit() {
     local exit_code=$?
-    local cmd="${1%%$'\n'}"
-    local timestamp=$EPOCHSECONDS
+
+    # Get the last history entry's timestamp from the history file
+    # History format: : timestamp:duration;command
+    local last_line="$(tail -1 "$HISTFILE" 2>/dev/null)"
+    local timestamp
+
+    # Extract timestamp from history line using regex
+    if [[ "$last_line" =~ "^: ([0-9]+):[0-9]+;" ]]; then
+        timestamp="${match[1]}"
+    else
+        # Fallback to current time if we can't parse the timestamp
+        timestamp=$EPOCHSECONDS
+    fi
 
     # Append to exit codes file
     echo "${timestamp}:${exit_code}" >> "$_zsh_clean_history_exit_file"
     _zsh_clean_history_exits[$timestamp]=$exit_code
-
-    # Let default history mechanism work
-    return 0
 }
 
 # Load existing exit codes
 _zsh_clean_history_load_exits
 
-# Hook into zsh
+# Hook into zsh - use precmd to capture exit code AFTER command runs
 autoload -Uz add-zsh-hook
-add-zsh-hook zshaddhistory _zsh_clean_history_save_exit
+add-zsh-hook precmd _zsh_clean_history_save_exit
 
 # Command to run cleanup manually
 clean-history() {
