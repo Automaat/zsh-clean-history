@@ -184,11 +184,29 @@ class TestIntegration(unittest.TestCase):
             for success_cmd in successful_cmds:
                 if get_base_command(failed_cmd) == get_base_command(success_cmd):
                     sim = similarity(failed_cmd, success_cmd)
-                    if sim >= threshold:
+                    if threshold <= sim < 1.0:
                         should_remove = True
                         break
 
         self.assertTrue(should_remove)
+
+    def test_failed_command_exact_match_not_removed(self):
+        """Test that failed commands matching successful ones exactly are not removed"""
+        failed_cmds = Counter({"git status": 2})
+        successful_cmds = Counter({"git status": 10})
+
+        threshold = 0.8
+        should_remove = False
+
+        for failed_cmd in failed_cmds:
+            for success_cmd in successful_cmds:
+                if get_base_command(failed_cmd) == get_base_command(success_cmd):
+                    sim = similarity(failed_cmd, success_cmd)
+                    if threshold <= sim < 1.0:
+                        should_remove = True
+                        break
+
+        self.assertFalse(should_remove)
 
 
 if __name__ == '__main__':
