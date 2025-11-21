@@ -230,7 +230,7 @@ def main():
         reason_counts = Counter(removal_reasons.values())
         action = "Would remove" if args.dry_run else "Removed"
         print(f"\n{action} {removed_count} lines:")
-        for reason, count in sorted(reason_counts.items()):
+        for reason, count in sorted(reason_counts.items(), key=lambda x: (-x[1], x[0])):
             print(f"  {reason}: {count}")
     elif removed_count == 0 and not args.quiet:
         print("No commands to remove")
