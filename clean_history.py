@@ -225,30 +225,13 @@ def main():
                 if idx not in lines_to_remove:
                     f.write(line + '\n')
 
-        if not args.quiet:
-            print(f"\nRemoved {removed_count} lines:")
-            sample_indices = sorted(lines_to_remove)[:20]
-            for idx in sample_indices:
-                timestamp, cmd = parse_history_line(all_lines[idx])
-                exit_code = exit_codes.get(timestamp)
-                reason = removal_reasons.get(idx, "unknown")
-                exit_str = f" (exit: {exit_code})" if exit_code is not None else ""
-                print(f"  - {cmd}{exit_str} [{reason}]")
-
-            if removed_count > 20:
-                print(f"  ... and {removed_count - 20} more")
-    elif args.dry_run and removed_count > 0 and not args.quiet:
-        print(f"\nWould remove {removed_count} lines:")
-        sample_indices = sorted(lines_to_remove)[:20]
-        for idx in sample_indices:
-            timestamp, cmd = parse_history_line(all_lines[idx])
-            exit_code = exit_codes.get(timestamp)
-            reason = removal_reasons.get(idx, "unknown")
-            exit_str = f" (exit: {exit_code})" if exit_code is not None else ""
-            print(f"  - {cmd}{exit_str} [{reason}]")
-
-        if removed_count > 20:
-            print(f"  ... and {removed_count - 20} more")
+    if removed_count > 0 and not args.quiet:
+        # Count removals by reason
+        reason_counts = Counter(removal_reasons.values())
+        action = "Would remove" if args.dry_run else "Removed"
+        print(f"\n{action} {removed_count} lines:")
+        for reason, count in sorted(reason_counts.items()):
+            print(f"  {reason}: {count}")
     elif removed_count == 0 and not args.quiet:
         print("No commands to remove")
 
