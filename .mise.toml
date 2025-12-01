@@ -14,7 +14,8 @@ description = "Run tests"
 run = "python -m unittest discover -v"
 
 [tasks.check]
-description = "Run linters (pylint and shellcheck)"
+description = "Run linters (ruff, mypy)"
 run = [
-  "pylint *.py",
+  "ruff check *.py",
+  "mypy *.py",
 ]
