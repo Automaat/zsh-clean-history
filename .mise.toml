@@ -1,6 +1,7 @@
 [tools]
 python = "3.11"
 shellcheck = "0.10.0"
+actionlint = "1.7.4"
 
 [env]
 _.python.venv = { path = ".venv", create = true }
@@ -14,8 +15,9 @@ description = "Run tests"
 run = "python -m unittest discover -v"
 
 [tasks.check]
-description = "Run linters (ruff, mypy)"
+description = "Run linters (ruff, mypy, actionlint)"
 run = [
   "ruff check *.py",
   "mypy *.py",
+  "actionlint",
 ]
