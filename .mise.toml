@@ -12,7 +12,11 @@ run = ["pip install --upgrade pip", "pip install -r requirements-dev.txt"]
 
 [tasks.test]
 description = "Run tests"
-run = "python -m unittest discover -v"
+run = "python -m pytest -v test_clean_history.py"
+
+[tasks.test-cov]
+description = "Run tests with coverage"
+run = "python -m pytest --cov=. --cov-report=xml --cov-report=term test_clean_history.py"
 
 [tasks.check]
 description = "Run linters (ruff, pyrefly, actionlint)"
