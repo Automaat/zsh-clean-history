@@ -19,4 +19,9 @@ convention = "google"
 
 [tool.pyrefly]
 python_version = "3.11"
-untyped_def_behavior = "check-and-infer-return-any"
+untyped_def_behavior = "check-and-infer-return-type"
+
+[tool.pyrefly.errors]
+implicit-abstract-class = true
+implicit-any = true
+implicitly-defined-attribute = true
