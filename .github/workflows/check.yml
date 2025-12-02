@@ -16,7 +16,13 @@ jobs:
         GITHUB_TOKEN: ${{ github.token }}
     - name: Install dependencies
       run: mise run install
-    - name: Run tests
-      run: mise run test
+    - name: Run tests with coverage
+      run: python -m pytest --cov=. --cov-report=xml --cov-report=term test_clean_history.py
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@b5c200dac5208e37b4b29c72bafff3b8563e3cb6 # v5.2.1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage.xml
+        fail_ci_if_error: true
     - name: Run linters
       run: mise run check
