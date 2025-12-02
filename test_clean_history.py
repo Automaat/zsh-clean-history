@@ -2,8 +2,7 @@
 """Tests for clean_history.py."""
 
 from collections import Counter, defaultdict
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import mock_open, patch
 
 import pytest
 
@@ -242,7 +241,7 @@ def test_parse_history_file_success_and_fail() -> None:
 
     with patch("clean_history.HISTORY_FILE") as mock_file:
         mock_file.open = mock_open(read_data=history_data)
-        all_lines, cmd_to_lines, seen_commands, successful_cmds, failed_cmds = _parse_history_file(
+        all_lines, cmd_to_lines, _seen_commands, successful_cmds, failed_cmds = _parse_history_file(
             exit_codes,
         )
 
@@ -261,7 +260,7 @@ def test_parse_history_file_duplicates() -> None:
 
     with patch("clean_history.HISTORY_FILE") as mock_file:
         mock_file.open = mock_open(read_data=history_data)
-        all_lines, cmd_to_lines, seen_commands, successful_cmds, failed_cmds = _parse_history_file(
+        all_lines, cmd_to_lines, seen_commands, successful_cmds, _failed_cmds = _parse_history_file(
             exit_codes,
         )
 
@@ -278,9 +277,8 @@ def test_parse_history_file_invalid_lines() -> None:
 
     with patch("clean_history.HISTORY_FILE") as mock_file:
         mock_file.open = mock_open(read_data=history_data)
-        all_lines, cmd_to_lines, seen_commands, successful_cmds, failed_cmds = _parse_history_file(
-            exit_codes,
-        )
+        result = _parse_history_file(exit_codes)
+        all_lines, cmd_to_lines = result[0], result[1]
 
     assert len(all_lines) == 3
     assert len(cmd_to_lines) == 2
@@ -323,7 +321,7 @@ def test_remove_failed_similar_commands_different_base() -> None:
         cmd_to_lines={"ls -la": [0], "git status": [1]},
     )
 
-    lines_to_remove, removal_reasons = _remove_failed_similar_commands(cmd_data, 0.8)
+    lines_to_remove, _removal_reasons = _remove_failed_similar_commands(cmd_data, 0.8)
 
     assert len(lines_to_remove) == 0
 
@@ -354,7 +352,7 @@ def test_remove_rare_variants_skip_existing() -> None:
     settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=True)
     existing_removals = {3}
 
-    lines_to_remove, removal_reasons = _remove_rare_variants(cmd_data, settings, existing_removals)
+    lines_to_remove, _removal_reasons = _remove_rare_variants(cmd_data, settings, existing_removals)
 
     assert 3 not in lines_to_remove
     assert 4 in lines_to_remove
@@ -369,7 +367,7 @@ def test_remove_rare_variants_threshold() -> None:
     )
     settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=True)
 
-    lines_to_remove, removal_reasons = _remove_rare_variants(cmd_data, settings, set())
+    lines_to_remove, _removal_reasons = _remove_rare_variants(cmd_data, settings, set())
 
     assert len(lines_to_remove) == 0
 
@@ -388,7 +386,7 @@ def test_identify_removals_all_strategies() -> None:
     seen_commands = {"git statsu": 0, "git status": 1, "ls -la": 3}
     settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=True)
 
-    lines_to_remove, removal_reasons = _identify_removals(cmd_data, seen_commands, settings)
+    lines_to_remove, _removal_reasons = _identify_removals(cmd_data, seen_commands, settings)
 
     assert 0 in lines_to_remove
     assert 2 in lines_to_remove
@@ -406,7 +404,7 @@ def test_identify_removals_no_rare() -> None:
     seen_commands = {"git statsu": 0, "git status": 1}
     settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=False)
 
-    lines_to_remove, removal_reasons = _identify_removals(cmd_data, seen_commands, settings)
+    lines_to_remove, _removal_reasons = _identify_removals(cmd_data, seen_commands, settings)
 
     assert 0 in lines_to_remove
     assert 2 in lines_to_remove
@@ -426,7 +424,19 @@ def test_parse_arguments_defaults() -> None:
 
 def test_parse_arguments_custom() -> None:
     """Test argument parsing with custom values."""
-    with patch("sys.argv", ["clean_history.py", "--similarity", "0.9", "--rare-threshold", "5", "--remove-rare", "--dry-run", "--quiet"]):
+    with patch(
+        "sys.argv",
+        [
+            "clean_history.py",
+            "--similarity",
+            "0.9",
+            "--rare-threshold",
+            "5",
+            "--remove-rare",
+            "--dry-run",
+            "--quiet",
+        ],
+    ):
         settings, args = _parse_arguments()
 
     assert settings.similarity_threshold == 0.9
@@ -436,7 +446,7 @@ def test_parse_arguments_custom() -> None:
     assert args.quiet is True
 
 
-def test_main_dry_run(capsys: pytest.CaptureFixture) -> None:
+def test_main_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
     """Test main function in dry-run mode."""
     history_data = ": 1234567890:0;git status\n: 1234567891:0;git status\n"
     exit_data = "1234567890:0\n1234567891:0\n"
@@ -456,7 +466,7 @@ def test_main_dry_run(capsys: pytest.CaptureFixture) -> None:
     assert "Duplicate" in captured.out
 
 
-def test_main_no_removals(capsys: pytest.CaptureFixture) -> None:
+def test_main_no_removals(capsys: pytest.CaptureFixture[str]) -> None:
     """Test main function with no commands to remove."""
     history_data = ": 1234567890:0;git status\n"
     exit_data = "1234567890:0\n"
@@ -476,7 +486,7 @@ def test_main_no_removals(capsys: pytest.CaptureFixture) -> None:
     assert "No commands to remove" in captured.out
 
 
-def test_main_quiet_mode(capsys: pytest.CaptureFixture) -> None:
+def test_main_quiet_mode(capsys: pytest.CaptureFixture[str]) -> None:
     """Test main function in quiet mode."""
     history_data = ": 1234567890:0;git status\n: 1234567891:0;git status\n"
     exit_data = "1234567890:0\n1234567891:0\n"
