@@ -21,8 +21,7 @@ run = "python -m pytest --cov=. --cov-report=xml --cov-report=term test_clean_hi
 [tasks.check]
 description = "Run linters (ruff, pyrefly, actionlint)"
 run = [
-  "ruff check --fix *.py",
-  "ruff format *.py",
+  "ruff check *.py",
   "pyrefly check *.py",
   "actionlint",
 ]
