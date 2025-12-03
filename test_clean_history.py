@@ -225,9 +225,13 @@ def test_failed_prefix_removed() -> None:
 
     for failed_cmd in failed_cmds:
         for success_cmd in successful_cmds:
-            if (get_base_command(failed_cmd) == get_base_command(success_cmd)
-                    and success_cmd.startswith(failed_cmd) and success_cmd != failed_cmd
-                    and len(success_cmd) > len(failed_cmd) and success_count > fail_count):
+            if (
+                get_base_command(failed_cmd) == get_base_command(success_cmd)
+                and success_cmd.startswith(failed_cmd)
+                and success_cmd != failed_cmd
+                and len(success_cmd) > len(failed_cmd)
+                and success_count > fail_count
+            ):
                 should_remove = True
                 break
 
@@ -451,10 +455,9 @@ def test_main_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
     history_data = ": 1234567890:0;git status\n: 1234567891:0;git status\n"
     exit_data = "1234567890:0\n1234567891:0\n"
 
-    with patch("sys.argv", ["clean_history.py", "--dry-run"]), \
-         patch("clean_history.HISTORY_FILE") as mock_history, \
-         patch("clean_history.EXIT_FILE") as mock_exit:
-
+    with patch("sys.argv", ["clean_history.py", "--dry-run"]), patch(
+        "clean_history.HISTORY_FILE"
+    ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit:
         mock_history.open = mock_open(read_data=history_data)
         mock_exit.exists.return_value = True
         mock_exit.open = mock_open(read_data=exit_data)
@@ -471,11 +474,9 @@ def test_main_no_removals(capsys: pytest.CaptureFixture[str]) -> None:
     history_data = ": 1234567890:0;git status\n"
     exit_data = "1234567890:0\n"
 
-    with patch("sys.argv", ["clean_history.py"]), \
-         patch("clean_history.HISTORY_FILE") as mock_history, \
-         patch("clean_history.EXIT_FILE") as mock_exit, \
-         patch("shutil.copy2"):
-
+    with patch("sys.argv", ["clean_history.py"]), patch(
+        "clean_history.HISTORY_FILE"
+    ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit, patch("shutil.copy2"):
         mock_history.open = mock_open(read_data=history_data)
         mock_exit.exists.return_value = True
         mock_exit.open = mock_open(read_data=exit_data)
@@ -491,10 +492,9 @@ def test_main_quiet_mode(capsys: pytest.CaptureFixture[str]) -> None:
     history_data = ": 1234567890:0;git status\n: 1234567891:0;git status\n"
     exit_data = "1234567890:0\n1234567891:0\n"
 
-    with patch("sys.argv", ["clean_history.py", "--quiet", "--dry-run"]), \
-         patch("clean_history.HISTORY_FILE") as mock_history, \
-         patch("clean_history.EXIT_FILE") as mock_exit:
-
+    with patch("sys.argv", ["clean_history.py", "--quiet", "--dry-run"]), patch(
+        "clean_history.HISTORY_FILE"
+    ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit:
         mock_history.open = mock_open(read_data=history_data)
         mock_exit.exists.return_value = True
         mock_exit.open = mock_open(read_data=exit_data)
@@ -510,11 +510,11 @@ def test_main_creates_backup() -> None:
     history_data = ": 1234567890:0;git status\n"
     exit_data = "1234567890:0\n"
 
-    with patch("sys.argv", ["clean_history.py"]), \
-         patch("clean_history.HISTORY_FILE") as mock_history, \
-         patch("clean_history.EXIT_FILE") as mock_exit, \
-         patch("shutil.copy2") as mock_copy:
-
+    with patch("sys.argv", ["clean_history.py"]), patch(
+        "clean_history.HISTORY_FILE"
+    ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit, patch(
+        "shutil.copy2"
+    ) as mock_copy:
         mock_history.open = mock_open(read_data=history_data)
         mock_exit.exists.return_value = True
         mock_exit.open = mock_open(read_data=exit_data)
@@ -531,11 +531,9 @@ def test_main_writes_cleaned_history() -> None:
 
     mock_file_handle = mock_open(read_data=history_data)
 
-    with patch("sys.argv", ["clean_history.py"]), \
-         patch("clean_history.HISTORY_FILE") as mock_history, \
-         patch("clean_history.EXIT_FILE") as mock_exit, \
-         patch("shutil.copy2"):
-
+    with patch("sys.argv", ["clean_history.py"]), patch(
+        "clean_history.HISTORY_FILE"
+    ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit, patch("shutil.copy2"):
         mock_history.open = mock_file_handle
         mock_exit.exists.return_value = True
         mock_exit.open = mock_open(read_data=exit_data)
