@@ -3,3 +3,6 @@ __pycache__/
 *.backup
 .DS_Store
 .venv/
+.coverage
+coverage.xml
+htmlcov/

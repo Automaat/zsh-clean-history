@@ -1,21 +1,86 @@
 [tool.ruff]
-target-version = "py38"
+target-version = "py311"
 line-length = 100
+fix = true
+show-fixes = true
+output-format = "full"
+
+extend-exclude = [
+    ".venv",
+    "venv",
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "*.egg-info",
+]
 
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "T201",  # Allow print in CLI script
+    # Project-specific
+    "T201",   # Allow print in CLI script
+
+    # Docstring rules (too verbose for scripts)
+    "D100", "D101", "D102", "D103", "D104", "D105", "D107",
+
+    # Type annotations (enable gradually if needed)
+    "ANN401",  # Dynamically typed expressions (Any)
+
+    # Formatter conflicts
+    "E501", "COM812", "ISC001",
+
+    # AI-generated patterns
+    "B008", "TRY003", "EM101", "EM102",
+
+    # Too strict for scripts
+    "PLR2004",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = [
+    "S101",     # Allow assert
+    "ANN",      # No type annotations required
+    "D",        # No docstrings required
+    "PLR2004",  # Magic values OK
+    "ARG",      # Unused fixtures OK
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 12
+max-returns = 6
+max-statements = 50
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+force-wrap-aliases = true
+lines-after-imports = 2
+lines-between-types = 1
+split-on-trailing-comma = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
-[tool.ruff.lint.per-file-ignores]
-"test_*.py" = [
-    "S101",     # Allow assert usage in tests
-    "PLR2004",  # Allow magic values in tests
-]
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "double"
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true
+suppress-none-returning = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
 
 [tool.pyrefly]
 python_version = "3.11"

@@ -29,9 +29,10 @@ mise run test
 mise run check
 
 # Manual commands
-python -m unittest discover -v        # Run tests
-pylint *.py                           # Lint Python files
-shellcheck *.zsh                      # Lint shell scripts
+python -m pytest -v test_clean_history.py   # Run tests
+ruff check --fix *.py                       # Lint Python files
+ruff format *.py                            # Format Python files
+shellcheck *.zsh                            # Lint shell scripts
 ```
 
 ## Testing plugin locally
@@ -48,10 +49,10 @@ clean-history-info                    # Show config
 
 ## Code quality
 
-- Maintain 10/10 pylint score
+- Pass all Ruff linting checks (800+ rules enabled)
 - Add tests for new functionality
-- Follow existing code style
-- Keep functions small and focused
+- Follow existing code style (auto-formatted with Ruff)
+- Keep functions small and focused (max complexity: 10)
 
 ## Pull requests
 

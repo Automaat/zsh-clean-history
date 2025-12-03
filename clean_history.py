@@ -12,10 +12,12 @@ import argparse
 import contextlib
 import re
 import shutil
+
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
+
 
 HISTORY_FILE = Path.home() / ".zsh_history"
 EXIT_FILE = Path.home() / ".zsh_history_exits"
@@ -155,8 +157,12 @@ def _remove_failed_similar_commands(
                 continue
 
             # Check if failed command is a prefix of successful one
-            if (success_cmd.startswith(failed_cmd) and success_cmd != failed_cmd
-                    and len(success_cmd) > len(failed_cmd) and success_count > fail_count):
+            if (
+                success_cmd.startswith(failed_cmd)
+                and success_cmd != failed_cmd
+                and len(success_cmd) > len(failed_cmd)
+                and success_count > fail_count
+            ):
                 for idx in cmd_data.cmd_to_lines[failed_cmd]:
                     lines_to_remove.add(idx)
                     removal_reasons[idx] = f"Failed prefix of '{success_cmd}'"

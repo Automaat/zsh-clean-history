@@ -25,3 +25,11 @@ run = [
   "pyrefly check *.py",
   "actionlint",
 ]
+
+[tasks.lint]
+description = "Run Ruff linter with auto-fix"
+run = "ruff check --fix ."
+
+[tasks.format]
+description = "Format code with Ruff"
+run = "ruff format ."
