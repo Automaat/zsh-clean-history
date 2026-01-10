@@ -1,5 +1,5 @@
 [tools]
-python = "3.11"
+python = "3.14.2"
 shellcheck = "0.11.0"
 actionlint = "1.7.10"
 
