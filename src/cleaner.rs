@@ -17,6 +17,11 @@ impl bk_tree::Metric<String> for DLMetric {
     fn distance(&self, a: &String, b: &String) -> u32 {
         damerau_levenshtein(a, b) as u32
     }
+
+    fn threshold_distance(&self, a: &String, b: &String, threshold: u32) -> Option<u32> {
+        let dist = self.distance(a, b);
+        (dist <= threshold).then_some(dist)
+    }
 }
 
 struct SuccessBucketIndex {
@@ -26,7 +31,7 @@ struct SuccessBucketIndex {
 
 impl SuccessBucketIndex {
     fn build(commands: &[&str]) -> Self {
-        let mut sorted: Vec<String> = commands.iter().map(|s| (*s).to_string()).collect();
+        let mut sorted: Vec<String> = commands.iter().map(|&s| s.to_owned()).collect();
         sorted.sort_unstable();
         let mut tree = BKTree::new(DLMetric);
         for cmd in &sorted {
