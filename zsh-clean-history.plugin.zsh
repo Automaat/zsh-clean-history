@@ -30,16 +30,17 @@ _zsh_clean_history_resolve_bin() {
 
 zmodload zsh/datetime 2>/dev/null
 typeset -g _zsh_clean_history_exit_file="${HOME}/.zsh_history_exits"
-typeset -gi _zsh_clean_history_pending_ts=0
+typeset -g _zsh_clean_history_pending_ts=0
 typeset -gi _zsh_clean_history_pending_histcmd=0
 typeset -gi _zsh_clean_history_recorded_histcmd=0
 
-# preexec captures EPOCHSECONDS at command start, which matches the timestamp
+# preexec captures EPOCHREALTIME at command start, which matches the timestamp
 # zsh writes into HISTFILE for EXTENDED_HISTORY entries. Without this, long-
 # running commands (e.g. `sleep 60`) would record an end-time timestamp that
-# never matches the history entry.
+# never matches the history entry. Microsecond precision avoids collisions when
+# multiple commands run within the same second.
 _zsh_clean_history_record_start() {
-    _zsh_clean_history_pending_ts=$EPOCHSECONDS
+    _zsh_clean_history_pending_ts=$EPOCHREALTIME
     _zsh_clean_history_pending_histcmd=$HISTCMD
 }
 

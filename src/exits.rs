@@ -20,7 +20,8 @@ pub fn load_exit_codes(path: &Path) -> Result<HashMap<String, i32>> {
         }
         if let Some((ts, code)) = line.split_once(':') {
             if let Ok(parsed) = code.parse::<i32>() {
-                out.insert(ts.to_string(), parsed);
+                let key = ts.split_once('.').map(|(s, _)| s).unwrap_or(ts);
+                out.insert(key.to_string(), parsed);
             }
         }
     }
@@ -69,10 +70,12 @@ mod tests {
         writeln!(f, "2:127").unwrap();
         writeln!(f, "garbage").unwrap();
         writeln!(f, "3:notanint").unwrap();
+        writeln!(f, "1700000000.123456:0").unwrap();
         let map = load_exit_codes(f.path()).unwrap();
         assert_eq!(map.get("1"), Some(&0));
         assert_eq!(map.get("2"), Some(&127));
         assert!(!map.contains_key("3"));
+        assert_eq!(map.get("1700000000"), Some(&0));
     }
 
     #[test]
