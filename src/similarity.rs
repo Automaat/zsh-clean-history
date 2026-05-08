@@ -1,6 +1,41 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
 use strsim::damerau_levenshtein;
 
 const FALLBACK_THRESHOLD: f64 = 0.95;
+
+static NORM_PATTERNS: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
+
+fn norm_patterns() -> &'static [(Regex, &'static str)] {
+    NORM_PATTERNS.get_or_init(|| {
+        vec![
+            (Regex::new(r"^https?://").unwrap(), "<URL>"),
+            (Regex::new(r"^/").unwrap(), "<PATH>"),
+            (Regex::new(r"^v\d+\.\d+\.\d+").unwrap(), "<VER>"),
+            (Regex::new(r"^[0-9a-fA-F]{6,}$").unwrap(), "<SHA>"),
+        ]
+    })
+}
+
+/// Normalise volatile tokens in a command string for similarity comparison.
+///
+/// Replaces hex SHAs (≥6 hex chars), absolute paths (`/…`), URLs (`https?://…`),
+/// and semver strings (`vN.N.N`) with stable placeholders so that structurally
+/// identical commands with different concrete values are not mistaken for typos.
+pub(crate) fn normalize(s: &str) -> String {
+    s.split_whitespace()
+        .map(|tok| {
+            for (re, placeholder) in norm_patterns() {
+                if re.is_match(tok) {
+                    return placeholder.to_string();
+                }
+            }
+            tok.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 // Intentionally crate-private: the public API exposes `command_similar`;
 // raw ratio values are an implementation detail not guaranteed to be stable.
@@ -48,14 +83,16 @@ pub(crate) fn command_similar(failed: &str, success: &str, threshold: f64) -> bo
     if failed == success {
         return false;
     }
-    let (failed_head, failed_rest) = command_split(failed);
-    let (success_head, success_rest) = command_split(success);
+    let failed_norm = normalize(failed);
+    let success_norm = normalize(success);
+    let (failed_head, failed_rest) = command_split(&failed_norm);
+    let (success_head, success_rest) = command_split(&success_norm);
     let head_sim = ratio(&failed_head, &success_head);
     if head_sim >= threshold && head_sim < 1.0 {
         if failed_rest == success_rest {
             return true;
         }
-        return ratio(failed, success) >= FALLBACK_THRESHOLD;
+        return ratio(&failed_norm, &success_norm) >= FALLBACK_THRESHOLD;
     }
     false
 }
@@ -143,6 +180,71 @@ mod tests {
         assert!(!command_similar(
             "git cmmit --amned",
             "git commit --amend",
+            0.8
+        ));
+    }
+
+    // --- normalize unit tests ---
+
+    #[test]
+    fn normalize_hex_sha_replaced() {
+        assert_eq!(normalize("git checkout abc123"), "git checkout <SHA>");
+    }
+
+    #[test]
+    fn normalize_hex_below_min_len_kept() {
+        assert_eq!(normalize("foo abcde"), "foo abcde");
+    }
+
+    #[test]
+    fn normalize_absolute_path_replaced() {
+        assert_eq!(normalize("ls /home/user"), "ls <PATH>");
+    }
+
+    #[test]
+    fn normalize_url_replaced() {
+        assert_eq!(normalize("curl https://example.com/api"), "curl <URL>");
+    }
+
+    #[test]
+    fn normalize_http_url_replaced() {
+        assert_eq!(normalize("curl http://example.com"), "curl <URL>");
+    }
+
+    #[test]
+    fn normalize_semver_replaced() {
+        assert_eq!(normalize("git checkout v1.2.3"), "git checkout <VER>");
+    }
+
+    // --- command_similar behaviour with normalised tokens ---
+
+    #[test]
+    fn sha_args_not_similar() {
+        assert!(!command_similar("git checkout abc123", "git checkout def456", 0.8));
+    }
+
+    #[test]
+    fn path_args_not_similar() {
+        // /home/user1 ends up in head (second word) — normalization collapses both
+        // to "ls <PATH>" so head_sim == 1.0 and the pair is not flagged
+        assert!(!command_similar("ls /home/user1", "ls /home/user2", 0.8));
+    }
+
+    #[test]
+    fn url_args_not_similar() {
+        assert!(!command_similar(
+            "curl https://api.example.com/v1",
+            "curl https://api.other.com/v2",
+            0.8
+        ));
+    }
+
+    #[test]
+    fn typo_with_sha_arg_still_caught() {
+        // head typo ("checkot") + same logical arg (both SHA) → still flagged
+        assert!(command_similar(
+            "git checkot abc123",
+            "git checkout abc123",
             0.8
         ));
     }
