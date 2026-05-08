@@ -186,17 +186,22 @@ fn failed_similar_to_successful(
 }
 
 fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
-    // Count bases from successful runs only — failed typos must not inflate "common" bases
-    // and must not suppress rare-but-legitimate bases.
+    // Total counts (success + failed) per base for the common-base threshold.
+    // Failed runs of a legitimate tool (e.g. `git log` returning non-zero) contribute
+    // to making that base "common"; they are not typos of the base itself.
+    let mut total_base_counts: HashMap<&str, usize> = HashMap::new();
+    for (cmd, &n) in parsed.successful_counts.iter().chain(parsed.failed_counts.iter()) {
+        *total_base_counts.entry(base_command(cmd)).or_default() += n;
+    }
+
+    // Successful counts per base — used only for the rare-base threshold so that
+    // failed typos cannot inflate the success count and suppress detection.
     let mut success_base_counts: HashMap<&str, usize> = HashMap::new();
     for (cmd, &n) in &parsed.successful_counts {
         *success_base_counts.entry(base_command(cmd)).or_default() += n;
     }
 
-    // Candidate rare bases: bases that appear in failed_counts but have very few
-    // successful runs.  We source them from failed_counts so that a pure-failure
-    // typo base (0 successes) is still considered even though it is absent from
-    // success_base_counts.
+    // Candidate rare bases: appear in failed_counts, few successful runs.
     let mut failed_bases: HashSet<&str> = HashSet::new();
     for cmd in parsed.failed_counts.keys() {
         failed_bases.insert(base_command(cmd));
@@ -206,7 +211,7 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String
         .filter(|b| success_base_counts.get(b).copied().unwrap_or(0) <= 2)
         .collect();
 
-    let mut common_bases: Vec<(&str, usize)> = success_base_counts
+    let mut common_bases: Vec<(&str, usize)> = total_base_counts
         .iter()
         .filter(|&(_, &c)| c >= 20)
         .map(|(&b, &c)| (b, c))
@@ -586,7 +591,7 @@ mod tests {
             exits.push((i.to_string(), 0));
         }
         text.push_str(": 56:0;git status\n");
-        exits.push(("56".to_string(), 0));
+        exits.push(("56".to_string(), 1));
         let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
         let h = parse_with_exits(&text, &exits_ref);
         let removals = identify_removals(&h, &CleaningSettings::default(), None);
@@ -617,7 +622,7 @@ mod tests {
             exits.push((i.to_string(), 0));
         }
         text.push_str(": 21:0;gti status\n");
-        exits.push(("21".to_string(), 0));
+        exits.push(("21".to_string(), 1));
         let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
         let h = parse_with_exits(&text, &exits_ref);
         let removals = identify_removals(&h, &CleaningSettings::default(), None);
@@ -633,7 +638,7 @@ mod tests {
     #[test]
     fn cross_base_includes_failed_counts() {
         // 10 git status (successful) + 10 git log (failed) = git base total=20
-        // gti status (1, successful) should be flagged
+        // gti status (1, failed) should be flagged
         let mut text = String::new();
         let mut exits: Vec<(String, i32)> = Vec::new();
         for i in 1..=10usize {
@@ -645,7 +650,7 @@ mod tests {
             exits.push((i.to_string(), 1));
         }
         text.push_str(": 21:0;gti status\n");
-        exits.push(("21".to_string(), 0));
+        exits.push(("21".to_string(), 1));
         let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
         let h = parse_with_exits(&text, &exits_ref);
         let removals = identify_removals(&h, &CleaningSettings::default(), None);
