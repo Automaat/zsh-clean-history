@@ -1151,14 +1151,16 @@ mod tests {
 
     #[test]
     fn rare_variant_30d_exact_not_removed() {
-        // At exactly 30d: weight=0.5; 2 common at 8d (weight=0.5 each → 1.0 total)
+        // Just under 30d (30d−5s): weight=0.5; 2 common at 8d (weight=0.5 each → 1.0 total)
         // 1.0 > 0.5*3=1.5? No → not removed
+        // 5s buffer keeps test stable under wall-clock drift; exact 30d boundary
+        // tested deterministically in time_decay_weight_buckets.
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         let eight_days_ago = now - 8 * 24 * 3600;
-        let thirty_days_ago = now - 30 * 24 * 3600;
+        let thirty_days_ago = now - 30 * 24 * 3600 + 5;
         let mut text = String::new();
         let mut exits: Vec<(String, i32)> = Vec::new();
         for i in 0..2 {
@@ -1213,14 +1215,16 @@ mod tests {
 
     #[test]
     fn rare_variant_7d_exact_full_weight() {
-        // Exactly 7d old: weight=1.0; 7 common at 8d (weight=0.5 each → 3.5 total)
+        // Just under 7d (7d−5s): weight=1.0; 7 common at 8d (weight=0.5 each → 3.5 total)
         // 3.5 > 1.0*3=3.0 → removed
+        // 5s buffer keeps test stable under wall-clock drift; exact 7d boundary
+        // tested deterministically in time_decay_weight_buckets.
         let now = SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
         let eight_days_ago = now - 8 * 24 * 3600;
-        let seven_days_ago = now - 7 * 24 * 3600;
+        let seven_days_ago = now - 7 * 24 * 3600 + 5;
         let mut text = String::new();
         let mut exits: Vec<(String, i32)> = Vec::new();
         for i in 0..7 {
