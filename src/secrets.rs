@@ -10,24 +10,37 @@ static PATTERNS: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
 fn patterns() -> &'static [(&'static str, Regex)] {
     PATTERNS.get_or_init(|| {
         vec![
+            ("password", Regex::new(r"(?i)password=[^\s]+").unwrap()),
+            ("token", Regex::new(r"(?i)token=[^\s]{8,}").unwrap()),
+            ("API key", Regex::new(r"(?i)api[_-]?key=[^\s]+").unwrap()),
             (
-                "AWS secret key",
-                Regex::new(r"AWS_SECRET_ACCESS_KEY=[^\s]+").unwrap(),
+                "Bearer token",
+                Regex::new(r"Bearer\s+ey[A-Za-z0-9_.-]+").unwrap(),
+            ),
+            (
+                "GitHub token",
+                Regex::new(r"gh[pso]_[A-Za-z0-9]{36}").unwrap(),
+            ),
+            (
+                "GitHub PAT",
+                Regex::new(r"github_pat_[A-Za-z0-9_]{82}").unwrap(),
+            ),
+            (
+                "connection string",
+                Regex::new(r"\w+://[^@\s]+:[^@\s]+@").unwrap(),
             ),
             (
                 "AWS access key",
                 Regex::new(r"AWS_ACCESS_KEY_ID=AKIA[A-Z0-9]{16}").unwrap(),
             ),
             (
-                "Bearer token",
-                Regex::new(r"Bearer\s+ey[A-Za-z0-9_.-]+").unwrap(),
+                "AWS secret key",
+                Regex::new(r"AWS_SECRET_ACCESS_KEY=[^\s]+").unwrap(),
             ),
-            ("password", Regex::new(r"(?i)password=[^\s]+").unwrap()),
-            ("token", Regex::new(r"(?i)token=[^\s]+").unwrap()),
-            ("API key", Regex::new(r"(?i)api[_-]?key=[^\s]+").unwrap()),
             (
                 "hex blob",
-                Regex::new(r"=[A-Fa-f0-9]{40,}(?:[^A-Fa-f0-9]|$)").unwrap(),
+                // 64+ chars avoids false positives from 40-char git SHA1 hashes
+                Regex::new(r"=[A-Fa-f0-9]{64,}(?:[^A-Fa-f0-9]|$)").unwrap(),
             ),
             (
                 "base64 blob",
@@ -38,15 +51,15 @@ fn patterns() -> &'static [(&'static str, Regex)] {
 }
 
 /// Marks entries containing secret patterns for removal, overriding any prior reason.
-pub fn mark_secrets(
+pub(crate) fn mark_secrets(
     parsed: &ParsedHistory,
-    removals: &mut HashMap<usize, (String, Option<String>)>,
+    removals: &mut HashMap<usize, String>,
 ) {
     for (idx, entry) in parsed.entries.iter().enumerate() {
         let Some(cmd) = &entry.command else { continue };
         for (name, re) in patterns() {
             if re.is_match(cmd) {
-                removals.insert(idx, (format!("Secret pattern: {name}"), None));
+                removals.insert(idx, format!("Secret pattern: {name}"));
                 break;
             }
         }
@@ -74,6 +87,17 @@ mod tests {
         let removals = identify_removals(&h, &CleaningSettings::default());
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("AWS secret key"));
+    }
+
+    #[test]
+    fn aws_access_key_removed() {
+        let h = parse(
+            ": 1:0;export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
+            &[("1", 0)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default());
+        assert_eq!(removals.len(), 1);
+        assert!(removals[0].reason.contains("AWS access key"));
     }
 
     #[test]
@@ -112,12 +136,40 @@ mod tests {
     #[test]
     fn hex_blob_removed() {
         let h = parse(
-            ": 1:0;WEBHOOK_SECRET=aabbccddeeff00112233445566778899aabbccdd ./deploy.sh\n",
+            ": 1:0;WEBHOOK_SECRET=aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899 ./deploy.sh\n",
             &[("1", 0)],
         );
         let removals = identify_removals(&h, &CleaningSettings::default());
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("hex blob"));
+    }
+
+    #[test]
+    fn git_sha_not_removed() {
+        let h = parse(
+            ": 1:0;git reset --hard aabbccddeeff00112233445566778899aabbccdd\n",
+            &[("1", 0)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default());
+        assert!(removals.is_empty());
+    }
+
+    #[test]
+    fn short_token_not_removed() {
+        let h = parse(": 1:0;git config credential.token=x\n", &[("1", 0)]);
+        let removals = identify_removals(&h, &CleaningSettings::default());
+        assert!(removals.is_empty());
+    }
+
+    #[test]
+    fn connection_string_removed() {
+        let h = parse(
+            ": 1:0;psql postgres://admin:s3cr3tpass@db.example.com/mydb\n",
+            &[("1", 0)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default());
+        assert_eq!(removals.len(), 1);
+        assert!(removals[0].reason.contains("connection string"));
     }
 
     #[test]
