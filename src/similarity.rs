@@ -77,33 +77,67 @@ pub(crate) fn bases_within_dl1(a: &str, b: &str) -> bool {
 /// Split a command into its first two quote-aware tokens (head) and the rest.
 ///
 /// Handles single and double quoted arguments so that `git commit -m "hello world"`
-/// tokenizes as ["git", "commit", "-m", "hello world"] rather than splitting the
-/// quoted string on the internal space.
+/// tokenizes as ["git", "commit", "-m", "hello world"] rather than splitting on
+/// the internal space. Inside double quotes, `\"` and `\\` are treated as escape
+/// sequences. Outside quotes, `\X` yields literal `X`. Empty quoted args (`""`)
+/// are preserved as empty tokens so they remain distinct from a missing argument.
 fn command_split(cmd: &str) -> (String, String) {
     let mut tokens: Vec<String> = Vec::new();
     let mut current = String::new();
-    let mut in_quotes = false;
-    let mut quote_char = ' ';
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut token_started = false;
+    let mut chars = cmd.chars().peekable();
 
-    for ch in cmd.chars() {
-        match ch {
-            '"' | '\'' if !in_quotes => {
-                in_quotes = true;
-                quote_char = ch;
+    while let Some(ch) = chars.next() {
+        if in_single_quote {
+            if ch == '\'' {
+                in_single_quote = false;
+            } else {
+                current.push(ch);
             }
-            c if in_quotes && c == quote_char => {
-                in_quotes = false;
+        } else if in_double_quote {
+            if ch == '"' {
+                in_double_quote = false;
+            } else if ch == '\\' {
+                match chars.peek() {
+                    Some('"') | Some('\\') => current.push(chars.next().unwrap()),
+                    _ => current.push('\\'),
+                }
+            } else {
+                current.push(ch);
             }
-            ' ' | '\t' if !in_quotes => {
-                if !current.is_empty() {
-                    tokens.push(current.clone());
-                    current.clear();
+        } else {
+            match ch {
+                '\'' => {
+                    in_single_quote = true;
+                    token_started = true;
+                }
+                '"' => {
+                    in_double_quote = true;
+                    token_started = true;
+                }
+                '\\' => {
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                        token_started = true;
+                    }
+                }
+                ' ' | '\t' => {
+                    if token_started || !current.is_empty() {
+                        tokens.push(current.clone());
+                        current.clear();
+                        token_started = false;
+                    }
+                }
+                c => {
+                    current.push(c);
+                    token_started = true;
                 }
             }
-            c => current.push(c),
         }
     }
-    if !current.is_empty() {
+    if token_started || !current.is_empty() {
         tokens.push(current);
     }
 
@@ -384,12 +418,27 @@ mod tests {
     }
 
     #[test]
-    fn command_split_backslash_not_treated_as_escape() {
-        // minimal tokenizer: \ is literal, " still acts as quote delimiter,
-        // so \"escaped\" is tokenized as \escaped\ (quotes stripped, \ kept)
+    fn command_split_backslash_escapes_quote_outside_quotes() {
+        // Outside quotes, \" is a literal " in the token (not a quote delimiter)
         let (head, rest) = command_split(r#"echo \"escaped\""#);
-        assert_eq!(head, r"echo \escaped\");
+        assert_eq!(head, r#"echo "escaped""#);
         assert_eq!(rest, "");
+    }
+
+    #[test]
+    fn command_split_escaped_quote_inside_double_quotes() {
+        // \" inside double quotes yields a literal " without closing the string
+        let (head, rest) = command_split(r#"git commit -m "hello \"world\"""#);
+        assert_eq!(head, "git commit");
+        assert_eq!(rest, r#"-m hello "world""#);
+    }
+
+    #[test]
+    fn command_split_empty_quoted_arg_preserved() {
+        // "" must produce an empty token so -m "" differs from bare -m
+        let (head, rest) = command_split(r#"git commit -m """#);
+        assert_eq!(head, "git commit");
+        assert_eq!(rest, "-m ");
     }
 
     #[test]
