@@ -1,8 +1,4 @@
-*.pyc
-__pycache__/
+target/
+Cargo.lock.bak
 *.backup
 .DS_Store
-.venv/
-.coverage
-coverage.xml
-htmlcov/

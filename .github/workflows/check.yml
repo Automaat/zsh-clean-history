@@ -8,21 +8,26 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
     - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
       env:
         GITHUB_TOKEN: ${{ github.token }}
-    - name: Install dependencies
-      run: mise run install
-    - name: Run tests with coverage
-      run: mise run test-cov
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./coverage.xml
-        fail_ci_if_error: true
-    - name: Run linters
-      run: mise run check
+    - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+    - name: cargo fmt
+      run: cargo fmt --all -- --check
+    - name: cargo clippy
+      run: cargo clippy --all-targets -- -D warnings
+    - name: cargo test
+      run: cargo test --all-targets
+    - name: zsh syntax check
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update && sudo apt-get install -y zsh
+        zsh -n zsh-clean-history.plugin.zsh
+    - name: actionlint
+      run: actionlint

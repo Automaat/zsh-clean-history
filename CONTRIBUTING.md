@@ -1,88 +1,68 @@
 # Contributing
 
-Contributions welcome! Follow these guidelines to get started.
-
 ## Prerequisites
 
-- Python 3.11+
+- Rust 1.85+
 - [mise](https://mise.jdx.dev/) for dev environment
 - zsh for plugin testing
 
 ## Setup
 
 ```bash
-# Install mise if needed
-curl https://mise.run | sh
-
-# Install tools and dependencies
 mise install
-mise run install
+cargo build
 ```
 
-## Development commands
+## Development
 
 ```bash
-# Run tests
-mise run test
-
-# Run linters
-mise run check
-
-# Manual commands
-python -m pytest -v test_clean_history.py   # Run tests
-ruff check --fix *.py                       # Lint Python files
-ruff format *.py                            # Format Python files
-shellcheck *.zsh                            # Lint shell scripts
+mise run test       # cargo test --all-targets
+mise run check      # fmt-check + clippy + zsh -n + actionlint
+mise run fmt        # cargo fmt --all
+mise run install    # install binary to ~/.cargo/bin
 ```
 
-## Testing plugin locally
+## Testing the plugin locally
 
 ```bash
-# Source plugin in current shell
+cargo build --release
 source zsh-clean-history.plugin.zsh
-
-# Test commands
-clean-history-stats                   # Dry run
-clean-history                         # Run cleanup
-clean-history-info                    # Show config
+clean-history-stats
+clean-history-info
 ```
 
 ## Code quality
 
-- Pass all Ruff linting checks (800+ rules enabled)
-- Add tests for new functionality
-- Follow existing code style (auto-formatted with Ruff)
-- Keep functions small and focused (max complexity: 10)
+- `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` must pass
+- Add tests for new behavior in either the relevant `src/<module>.rs` test module or `tests/cli.rs`
+- Keep modules focused
 
 ## Pull requests
 
-1. Fork and create feature branch
+1. Fork and create a feature branch
 2. Make changes with tests
 3. Run `mise run check` and `mise run test`
-4. Commit with descriptive message
-5. Open PR with:
-   - Motivation for change
+4. Open a PR with:
+   - Motivation
    - Implementation details
    - Supporting docs/issues
-
-## Commit messages
-
-Follow existing style:
-- Imperative mood ("Add feature" not "Added feature")
-- Concise subject line
-- Include context in body if needed
 
 ## Project structure
 
 ```
 .
-├── clean_history.py              # Core cleanup logic
-├── test_clean_history.py         # Unit tests
-├── zsh-clean-history.plugin.zsh  # Plugin integration
-├── .mise.toml                    # Dev environment config
-└── .github/workflows/            # CI configuration
+├── Cargo.toml
+├── src/
+│   ├── main.rs            # CLI entry point
+│   ├── lib.rs             # Public surface
+│   ├── cleaner.rs         # Removal strategies
+│   ├── history.rs         # ~/.zsh_history parser
+│   ├── exits.rs           # ~/.zsh_history_exits I/O
+│   ├── log.rs             # JSONL run log
+│   ├── paths.rs           # XDG/HOME path resolution
+│   ├── settings.rs        # CleaningSettings
+│   └── similarity.rs      # Damerau-Levenshtein ratio
+├── tests/cli.rs           # End-to-end CLI tests
+├── zsh-clean-history.plugin.zsh
+└── .github/workflows/check.yml
 ```
-
-## Questions?
-
-Open an issue for discussion before major changes.

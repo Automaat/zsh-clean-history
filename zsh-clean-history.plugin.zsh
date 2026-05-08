@@ -1,99 +1,90 @@
 #!/usr/bin/env zsh
-# zsh-clean-history: Smart history cleanup plugin
-# Removes typos and failed commands based on similarity analysis
+# zsh-clean-history: smart history cleanup plugin (Rust backend)
 
-# Get plugin directory
 ZSH_CLEAN_HISTORY_DIR="${0:A:h}"
-ZSH_CLEAN_HISTORY_SCRIPT="${ZSH_CLEAN_HISTORY_DIR}/clean_history.py"
+: ${ZSH_CLEAN_HISTORY_BIN:=zsh-clean-history}
+: ${ZSH_CLEAN_HISTORY_AUTO_CLEAN:=false}
+: ${ZSH_CLEAN_HISTORY_SIMILARITY:=0.8}
+: ${ZSH_CLEAN_HISTORY_RARE_THRESHOLD:=3}
 
-# Configuration (can be overridden in .zshrc before loading plugin)
-ZSH_CLEAN_HISTORY_AUTO_CLEAN=${ZSH_CLEAN_HISTORY_AUTO_CLEAN:-false}  # Auto-clean on shell exit
-ZSH_CLEAN_HISTORY_SIMILARITY=${ZSH_CLEAN_HISTORY_SIMILARITY:-0.8}
-ZSH_CLEAN_HISTORY_RARE_THRESHOLD=${ZSH_CLEAN_HISTORY_RARE_THRESHOLD:-3}
-
-# Enable extended history with exit codes
 setopt EXTENDED_HISTORY
 setopt INC_APPEND_HISTORY
 
-# Store exit codes in separate file
-typeset -g _zsh_clean_history_exit_file="${HOME}/.zsh_history_exits"
-typeset -gA _zsh_clean_history_exits
-
-_zsh_clean_history_load_exits() {
-    [[ -f "$_zsh_clean_history_exit_file" ]] || return
-    local line timestamp cmd exit_code
-    while IFS=: read -r timestamp exit_code; do
-        _zsh_clean_history_exits[$timestamp]=$exit_code
-    done < "$_zsh_clean_history_exit_file"
+_zsh_clean_history_resolve_bin() {
+    if (( $+commands[$ZSH_CLEAN_HISTORY_BIN] )); then
+        echo "$commands[$ZSH_CLEAN_HISTORY_BIN]"
+        return
+    fi
+    local local_bin="${ZSH_CLEAN_HISTORY_DIR}/target/release/zsh-clean-history"
+    if [[ -x "$local_bin" ]]; then
+        echo "$local_bin"
+        return
+    fi
+    local debug_bin="${ZSH_CLEAN_HISTORY_DIR}/target/debug/zsh-clean-history"
+    if [[ -x "$debug_bin" ]]; then
+        echo "$debug_bin"
+        return
+    fi
+    return 1
 }
+
+zmodload zsh/datetime 2>/dev/null
+typeset -g _zsh_clean_history_exit_file="${HOME}/.zsh_history_exits"
 
 _zsh_clean_history_save_exit() {
-    local exit_code=$?
-
-    # Get the last history entry's timestamp from the history file
-    # History format: : timestamp:duration;command
-    local last_line="$(tail -1 "$HISTFILE" 2>/dev/null)"
-    local timestamp
-
-    # Extract timestamp from history line using regex
-    if [[ "$last_line" =~ "^: ([0-9]+):[0-9]+;" ]]; then
-        timestamp="${match[1]}"
-    else
-        # Fallback to current time if we can't parse the timestamp
-        timestamp=$EPOCHSECONDS
-    fi
-
-    # Append to exit codes file
-    echo "${timestamp}:${exit_code}" >> "$_zsh_clean_history_exit_file"
-    _zsh_clean_history_exits[$timestamp]=$exit_code
+    local code=$?
+    local last="${history[$#history]}"
+    [[ -z "$last" ]] && return 0
+    print -r -- "${EPOCHSECONDS}:${code}" >>! "$_zsh_clean_history_exit_file"
 }
 
-# Load existing exit codes
-_zsh_clean_history_load_exits
-
-# Hook into zsh - use precmd to capture exit code AFTER command runs
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd _zsh_clean_history_save_exit
 
-# Command to run cleanup manually
 clean-history() {
-    if [[ ! -f "$ZSH_CLEAN_HISTORY_SCRIPT" ]]; then
-        echo "Error: Cleanup script not found at $ZSH_CLEAN_HISTORY_SCRIPT"
+    local bin
+    bin="$(_zsh_clean_history_resolve_bin)" || {
+        echo "zsh-clean-history: binary not found. Run 'cargo install --path ${ZSH_CLEAN_HISTORY_DIR}' or place 'zsh-clean-history' on PATH." >&2
         return 1
-    fi
-
-    python3 "$ZSH_CLEAN_HISTORY_SCRIPT" \
+    }
+    "$bin" \
         --similarity "$ZSH_CLEAN_HISTORY_SIMILARITY" \
         --rare-threshold "$ZSH_CLEAN_HISTORY_RARE_THRESHOLD" \
         "$@"
 }
 
-# Command to show plugin info
+clean-history-stats() {
+    clean-history --dry-run "$@"
+}
+
+clean-history-undo() {
+    local bin
+    bin="$(_zsh_clean_history_resolve_bin)" || return 1
+    "$bin" undo "$@"
+}
+
 clean-history-info() {
-    echo "zsh-clean-history plugin"
-    echo ""
+    echo "zsh-clean-history (Rust)"
+    echo
     echo "Configuration:"
-    echo "  Auto-clean on exit: $ZSH_CLEAN_HISTORY_AUTO_CLEAN"
+    echo "  Auto-clean on exit:   $ZSH_CLEAN_HISTORY_AUTO_CLEAN"
     echo "  Similarity threshold: $ZSH_CLEAN_HISTORY_SIMILARITY"
-    echo "  Rare threshold: $ZSH_CLEAN_HISTORY_RARE_THRESHOLD"
-    echo ""
+    echo "  Rare threshold:       $ZSH_CLEAN_HISTORY_RARE_THRESHOLD"
+    local bin
+    if bin="$(_zsh_clean_history_resolve_bin)"; then
+        echo "  Binary:               $bin"
+    else
+        echo "  Binary:               (not found on PATH)"
+    fi
+    echo
     echo "Commands:"
     echo "  clean-history       - Run cleanup now"
+    echo "  clean-history-stats - Dry run"
+    echo "  clean-history-undo  - Restore newest backup"
     echo "  clean-history-info  - Show this info"
-    echo "  clean-history-stats - Show history statistics"
+    echo "  clean-history-log   - Show last cleanup runs"
 }
 
-# Command to show stats without cleaning
-clean-history-stats() {
-    if [[ ! -f "$ZSH_CLEAN_HISTORY_SCRIPT" ]]; then
-        echo "Error: Cleanup script not found at $ZSH_CLEAN_HISTORY_SCRIPT"
-        return 1
-    fi
-
-    python3 "$ZSH_CLEAN_HISTORY_SCRIPT" --dry-run
-}
-
-# Command to inspect recent cleanup runs (default: last 5, --full for full JSON)
 clean-history-log() {
     local logfile="${HOME}/.zsh_history_cleanup.log"
     local n=5 full=false
@@ -109,7 +100,7 @@ clean-history-log() {
                 n="$2"; shift 2 ;;
             *)
                 if [[ ! "$1" =~ ^[0-9]+$ ]]; then
-                    echo "clean-history-log: invalid argument '$1' (expected integer or --full)" >&2
+                    echo "clean-history-log: invalid argument '$1'" >&2
                     return 2
                 fi
                 n="$1"; shift ;;
@@ -118,7 +109,6 @@ clean-history-log() {
 
     if [[ ! -f "$logfile" ]]; then
         echo "No cleanup log yet at $logfile"
-        echo "Run 'clean-history' or 'clean-history-stats' to generate entries."
         return 1
     fi
 
@@ -127,52 +117,21 @@ clean-history-log() {
         return
     fi
 
-    tail -n "$n" "$logfile" | python3 -c '
-import json, sys
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        e = json.loads(line)
-    except ValueError:
-        print(f"  [unparseable] {line}")
-        continue
-    if not isinstance(e, dict):
-        print(f"  [unexpected json] {line}")
-        continue
-    mode = "DRY-RUN" if e.get("dry_run") else "APPLIED"
-    ts = e.get("timestamp", "?")
-    rm = e.get("removed_count", "?")
-    tot = e.get("total_lines", "?")
-    settings = e.get("settings") or {}
-    sim = settings.get("similarity", "?")
-    rare = settings.get("rare_threshold", "?")
-    print(f"{ts}  {mode}  removed={rm}/{tot}  sim={sim} rare<={rare}")
-    for reason, count in sorted(
-        (e.get("reason_counts") or {}).items(), key=lambda x: -x[1]
-    ):
-        print(f"    {count:4}  {reason}")
-    samples = [
-        r for r in (e.get("removals") or [])
-        if isinstance(r, dict) and r.get("reason") != "Duplicate"
-    ][:5]
-    if samples:
-        print("    samples:")
-        for r in samples:
-            cmd = r.get("command", "")
-            if len(cmd) > 70:
-                cmd = cmd[:67] + "..."
-            reason = r.get("reason", "?")
-            print(f"      [{reason}] {cmd}")
-    print()
-'
+    if (( $+commands[jq] )); then
+        tail -n "$n" "$logfile" | jq -r '
+          (if .dry_run then "DRY-RUN" else "APPLIED" end) as $mode
+          | "\(.timestamp)  \($mode)  removed=\(.removed_count)/\(.total_lines)  sim=\(.settings.similarity) rare<=\(.settings.rare_threshold)",
+            (.reason_counts | to_entries | sort_by(-.value) | .[] | "    \(.value)  \(.key)"),
+            ((.removals // []) | map(select(.reason != "Duplicate"))[:5] | if length > 0 then "    samples:" else empty end),
+            ((.removals // []) | map(select(.reason != "Duplicate"))[:5] | .[] | "      [\(.reason)] \(.command[0:70])"),
+            ""
+        '
+    else
+        tail -n "$n" "$logfile"
+    fi
 }
 
-# Auto-clean on shell exit if enabled
 if [[ "$ZSH_CLEAN_HISTORY_AUTO_CLEAN" == "true" ]]; then
-    _zsh_clean_history_exit() {
-        clean-history --quiet
-    }
+    _zsh_clean_history_exit() { clean-history --quiet; }
     add-zsh-hook zshexit _zsh_clean_history_exit
 fi

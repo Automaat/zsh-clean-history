@@ -3,5 +3,11 @@
   "extends": [
     "config:recommended"
   ],
-  "reviewers": ["Automaat"]
+  "reviewers": ["Automaat"],
+  "packageRules": [
+    {
+      "matchManagers": ["cargo"],
+      "groupName": "cargo deps"
+    }
+  ]
 }
