@@ -148,7 +148,7 @@ fn cross_base_typo_removed_in_cleanup() {
         exits.push_str(&format!("{i}:0\n"));
     }
     history.push_str(": 21:0;gti status\n");
-    exits.push_str("21:0\n");
+    exits.push_str("21:1\n");
 
     fs::write(home.join(".zsh_history"), &history).unwrap();
     fs::write(home.join(".zsh_history_exits"), &exits).unwrap();
@@ -171,7 +171,7 @@ fn cross_base_typo_explain() {
         exits.push_str(&format!("{i}:0\n"));
     }
     history.push_str(": 21:0;gti status\n");
-    exits.push_str("21:0\n");
+    exits.push_str("21:1\n");
 
     fs::write(home.join(".zsh_history"), &history).unwrap();
     fs::write(home.join(".zsh_history_exits"), &exits).unwrap();
