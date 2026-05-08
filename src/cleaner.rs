@@ -190,7 +190,11 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String
     // Failed runs of a legitimate tool (e.g. `git log` returning non-zero) contribute
     // to making that base "common"; they are not typos of the base itself.
     let mut total_base_counts: HashMap<&str, usize> = HashMap::new();
-    for (cmd, &n) in parsed.successful_counts.iter().chain(parsed.failed_counts.iter()) {
+    for (cmd, &n) in parsed
+        .successful_counts
+        .iter()
+        .chain(parsed.failed_counts.iter())
+    {
         *total_base_counts.entry(base_command(cmd)).or_default() += n;
     }
 
