@@ -41,7 +41,10 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
     out
 }
 
-fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, (String, Option<String>)>) {
+fn dedup_keep_newest(
+    parsed: &ParsedHistory,
+    removals: &mut HashMap<usize, (String, Option<String>)>,
+) {
     for (cmd, indices) in &parsed.cmd_to_lines {
         if indices.len() <= 1 {
             continue;

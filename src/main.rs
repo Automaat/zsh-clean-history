@@ -141,12 +141,15 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
     let exit_codes = load_exit_codes(&paths.exits)?;
     let parsed = parse_history_file(&paths.history, &exit_codes)?;
     let removals = identify_removals(&parsed, &settings);
-    let removal_map: HashMap<usize, &Removal> =
-        removals.iter().map(|r| (r.line, r)).collect();
+    let removal_map: HashMap<usize, &Removal> = removals.iter().map(|r| (r.line, r)).collect();
 
     let success_count = parsed.successful_counts.get(command).copied().unwrap_or(0);
     let fail_count = parsed.failed_counts.get(command).copied().unwrap_or(0);
-    let indices = parsed.cmd_to_lines.get(command).cloned().unwrap_or_default();
+    let indices = parsed
+        .cmd_to_lines
+        .get(command)
+        .cloned()
+        .unwrap_or_default();
 
     if indices.is_empty() {
         anyhow::bail!("command not found in history: {command}");
