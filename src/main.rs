@@ -7,7 +7,8 @@ use clap::{Parser, Subcommand};
 use zsh_clean_history::clean::{LockedHistory, run_cleanup};
 use zsh_clean_history::cleaner::Removal;
 use zsh_clean_history::{
-    CleaningSettings, Paths, identify_removals, load_exit_codes, parse_history_file, write_log_entry,
+    CleaningSettings, Paths, identify_removals, load_exit_codes, parse_history_file,
+    write_log_entry,
 };
 
 include!("cli_definition.rs");

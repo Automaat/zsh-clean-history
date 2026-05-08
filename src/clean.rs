@@ -44,7 +44,11 @@ impl Drop for LockedHistory {
     }
 }
 
-pub fn run_cleanup(paths: &Paths, settings: &CleaningSettings, dry_run: bool) -> Result<CleanReport> {
+pub fn run_cleanup(
+    paths: &Paths,
+    settings: &CleaningSettings,
+    dry_run: bool,
+) -> Result<CleanReport> {
     let _lock = LockedHistory::acquire(&paths.lock_file())?;
 
     let exit_codes = load_exit_codes(&paths.exits)?;
@@ -79,7 +83,10 @@ pub fn run_cleanup(paths: &Paths, settings: &CleaningSettings, dry_run: bool) ->
         compact_exits_file(&paths.exits, &keep_ts)?;
     }
 
-    Ok(CleanReport { removals, total_lines })
+    Ok(CleanReport {
+        removals,
+        total_lines,
+    })
 }
 
 pub(crate) fn removals_set(removals: &[Removal]) -> HashSet<usize> {
@@ -218,7 +225,9 @@ mod tests {
         fs::write(&history, b"").unwrap();
 
         for i in 1..=7u32 {
-            let backup = dir.path().join(format!(".zsh_history.backup-20240101-{i:06}"));
+            let backup = dir
+                .path()
+                .join(format!(".zsh_history.backup-20240101-{i:06}"));
             fs::write(&backup, b"").unwrap();
         }
 
@@ -245,7 +254,9 @@ mod tests {
         fs::write(&history, b"").unwrap();
 
         for i in 1..=3u32 {
-            let backup = dir.path().join(format!(".zsh_history.backup-20240101-{i:06}"));
+            let backup = dir
+                .path()
+                .join(format!(".zsh_history.backup-20240101-{i:06}"));
             fs::write(&backup, b"").unwrap();
         }
 
@@ -254,7 +265,11 @@ mod tests {
         let count = fs::read_dir(dir.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_name().to_string_lossy().starts_with(".zsh_history.backup-"))
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".zsh_history.backup-")
+            })
             .count();
 
         assert_eq!(count, 3);
