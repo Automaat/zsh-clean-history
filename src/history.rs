@@ -175,3 +175,71 @@ mod tests {
         assert_eq!(h.cmd_to_lines.get("ls"), Some(&vec![0, 2]));
     }
 }
+
+#[cfg(test)]
+mod props {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn no_panic_arbitrary_text(text in any::<String>()) {
+            let _ = parse_history_text(&text, &HashMap::new());
+        }
+
+        // Covers non-UTF8: from_utf8_lossy mirrors what parse_history_file does.
+        #[test]
+        fn no_panic_binary_garbage(bytes in any::<Vec<u8>>()) {
+            let text = String::from_utf8_lossy(&bytes);
+            let _ = parse_history_text(&text, &HashMap::new());
+        }
+
+        // Half-written multi-line: line ends with an odd run of backslashes but has no
+        // continuation line — the inner loop must terminate at the buffer boundary.
+        #[test]
+        fn no_panic_half_written_multiline(
+            ts in 0u64..=9_999_999_999u64,
+            dur in 0u32..=3600u32,
+            cmd in "[ -~]{0,80}",
+            n in 1usize..=5usize,
+        ) {
+            let backslashes = "\\".repeat(n * 2 - 1);
+            let text = format!(": {ts}:{dur};{cmd}{backslashes}\n");
+            let _ = parse_history_text(&text, &HashMap::new());
+        }
+
+        // Each outer loop iteration consumes ≥1 line, so entries can never exceed line count.
+        #[test]
+        fn entries_bounded_by_line_count(text in any::<String>()) {
+            let result = parse_history_text(&text, &HashMap::new());
+            prop_assert!(result.entries.len() <= text.split('\n').count());
+        }
+
+        // parse_line always sets both fields or neither.
+        #[test]
+        fn timestamp_and_command_co_occur(text in any::<String>()) {
+            let result = parse_history_text(&text, &HashMap::new());
+            for entry in &result.entries {
+                prop_assert_eq!(entry.timestamp.is_some(), entry.command.is_some());
+            }
+        }
+
+        // All stored indices must be valid into the entries vec.
+        #[test]
+        fn all_indices_in_bounds(
+            text in any::<String>(),
+            exits in proptest::collection::hash_map(any::<String>(), any::<i32>(), 0..10),
+        ) {
+            let result = parse_history_text(&text, &exits);
+            let n = result.entries.len();
+            for &idx in result.last_seen.values() {
+                prop_assert!(idx < n);
+            }
+            for indices in result.cmd_to_lines.values() {
+                for &idx in indices {
+                    prop_assert!(idx < n);
+                }
+            }
+        }
+    }
+}
