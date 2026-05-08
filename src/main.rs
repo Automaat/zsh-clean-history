@@ -64,26 +64,31 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
         remove_rare: cli.remove_rare,
     };
 
-    let _lock = LockedHistory::acquire(&paths.history)?;
+    let _lock = LockedHistory::acquire(&paths.lock_file())?;
 
     let exit_codes = load_exit_codes(&paths.exits)?;
     let parsed = parse_history_file(&paths.history, &exit_codes)?;
     let removals = identify_removals(&parsed, &settings);
     let total_lines = parsed.entries.len();
+    let drop_set = removals_set(&removals);
 
     if !cli.dry_run && !removals.is_empty() {
         let backup = paths.backup_for(&Local::now().format("%Y%m%d-%H%M%S").to_string());
         if paths.history.exists() {
-            fs::copy(&paths.history, &backup).ok();
+            fs::copy(&paths.history, &backup)
+                .with_context(|| format!("create backup at {}", backup.display()))?;
             prune_old_backups(&paths.history, 5)?;
         }
-        write_history_atomically(&paths.history, &parsed.entries, &removals)?;
+        write_history_atomically(&paths.history, &parsed.entries, &drop_set)?;
+    }
+
+    if !cli.dry_run {
         let keep_ts: HashSet<String> = parsed
             .entries
             .iter()
             .enumerate()
             .filter_map(|(idx, e)| {
-                if removals_set(&removals).contains(&idx) {
+                if drop_set.contains(&idx) {
                     None
                 } else {
                     e.timestamp.clone()
@@ -127,9 +132,8 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
 fn write_history_atomically(
     path: &Path,
     entries: &[zsh_clean_history::HistoryEntry],
-    removals: &[Removal],
+    drop_set: &HashSet<usize>,
 ) -> Result<()> {
-    let drop_set = removals_set(removals);
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tmp = NamedTempFile::new_in(parent)?;
     for (idx, entry) in entries.iter().enumerate() {
@@ -139,8 +143,9 @@ fn write_history_atomically(
         tmp.write_all(entry.raw.as_bytes())?;
         tmp.write_all(b"\n")?;
     }
-    tmp.flush()?;
+    tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
+    fs::File::open(parent)?.sync_all()?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -182,6 +187,7 @@ fn prune_old_backups(history: &Path, keep: usize) -> Result<()> {
 }
 
 fn undo(paths: &Paths) -> Result<()> {
+    let _lock = LockedHistory::acquire(&paths.lock_file())?;
     let parent = paths
         .history
         .parent()

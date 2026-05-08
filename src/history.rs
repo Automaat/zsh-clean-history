@@ -32,19 +32,24 @@ pub fn parse_history_text(text: &str, exit_codes: &HashMap<String, i32>) -> Pars
 
     let mut idx = 0usize;
     while idx < raw_lines.len() {
-        let mut current = raw_lines[idx].trim_end_matches('\n').to_string();
+        let first = raw_lines[idx].trim_end_matches('\n');
+        let mut raw_full = first.to_string();
+        let mut joined = first.to_string();
         let mut consumed = 1usize;
 
-        while ends_with_unescaped_backslash(&current) && idx + consumed < raw_lines.len() {
-            current.pop();
-            current.push('\n');
-            current.push_str(raw_lines[idx + consumed].trim_end_matches('\n'));
+        while ends_with_unescaped_backslash(&joined) && idx + consumed < raw_lines.len() {
+            let next = raw_lines[idx + consumed].trim_end_matches('\n');
+            raw_full.push('\n');
+            raw_full.push_str(next);
+            joined.pop();
+            joined.push('\n');
+            joined.push_str(next);
             consumed += 1;
         }
 
-        let (timestamp, command) = parse_line(&current);
+        let (timestamp, command) = parse_line(&joined);
         parsed.entries.push(HistoryEntry {
-            raw: current,
+            raw: raw_full,
             timestamp: timestamp.clone(),
             command: command.clone(),
         });
@@ -135,7 +140,9 @@ mod tests {
         let h = parse(text);
         assert_eq!(h.entries.len(), 2);
         assert_eq!(h.entries[0].command.as_deref(), Some("echo foo \nbar baz"));
+        assert_eq!(h.entries[0].raw, ": 1234567890:0;echo foo \\\nbar baz");
         assert_eq!(h.entries[1].command.as_deref(), Some("pwd"));
+        assert_eq!(h.entries[1].raw, ": 1234567891:0;pwd");
     }
 
     #[test]

@@ -20,6 +20,18 @@ impl Paths {
         })
     }
 
+    pub fn lock_file(&self) -> PathBuf {
+        let mut p = self.history.clone();
+        let name = format!(
+            "{}.lock",
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(".zsh_history"),
+        );
+        p.set_file_name(name);
+        p
+    }
+
     pub fn backup_for(&self, suffix: &str) -> PathBuf {
         let mut p = self.history.clone();
         let name = format!(

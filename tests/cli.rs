@@ -77,3 +77,44 @@ fn undo_restores_latest_backup() {
     let restored = fs::read_to_string(home.join(".zsh_history")).unwrap();
     assert_eq!(restored, pre);
 }
+
+#[test]
+fn multiline_entry_round_trips_unchanged() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    let original = ": 1:0;echo foo \\
+  bar
+: 2:0;ls
+: 3:0;ls
+";
+    fs::write(home.join(".zsh_history"), original).unwrap();
+    fs::write(home.join(".zsh_history_exits"), "1:0\n2:0\n3:0\n").unwrap();
+
+    run(home, &["--quiet"]).success();
+
+    let after = fs::read_to_string(home.join(".zsh_history")).unwrap();
+    assert!(
+        after.contains(": 1:0;echo foo \\\n  bar"),
+        "multi-line entry corrupted: {after:?}"
+    );
+}
+
+#[test]
+fn compaction_runs_even_when_no_removals() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    fs::write(home.join(".zsh_history"), ": 1:0;ls\n: 2:0;pwd\n").unwrap();
+    fs::write(
+        home.join(".zsh_history_exits"),
+        "1:0\n2:0\n9999:0\n8888:1\n",
+    )
+    .unwrap();
+
+    run(home, &["--quiet"]).success();
+
+    let exits_after = fs::read_to_string(home.join(".zsh_history_exits")).unwrap();
+    assert!(exits_after.contains("1:0"));
+    assert!(exits_after.contains("2:0"));
+    assert!(!exits_after.contains("9999"));
+    assert!(!exits_after.contains("8888"));
+}

@@ -30,15 +30,32 @@ _zsh_clean_history_resolve_bin() {
 
 zmodload zsh/datetime 2>/dev/null
 typeset -g _zsh_clean_history_exit_file="${HOME}/.zsh_history_exits"
+typeset -gi _zsh_clean_history_pending_ts=0
+typeset -gi _zsh_clean_history_pending_histcmd=0
+typeset -gi _zsh_clean_history_recorded_histcmd=0
+
+# preexec captures EPOCHSECONDS at command start, which matches the timestamp
+# zsh writes into HISTFILE for EXTENDED_HISTORY entries. Without this, long-
+# running commands (e.g. `sleep 60`) would record an end-time timestamp that
+# never matches the history entry.
+_zsh_clean_history_record_start() {
+    _zsh_clean_history_pending_ts=$EPOCHSECONDS
+    _zsh_clean_history_pending_histcmd=$HISTCMD
+}
 
 _zsh_clean_history_save_exit() {
     local code=$?
-    local last="${history[$#history]}"
-    [[ -z "$last" ]] && return 0
-    print -r -- "${EPOCHSECONDS}:${code}" >>! "$_zsh_clean_history_exit_file"
+    # No command pending (initial prompt before first command runs)
+    (( _zsh_clean_history_pending_histcmd == 0 )) && return 0
+    # precmd can fire without a new command (bare Enter, line-edit interrupt);
+    # skip if we already recorded this HISTCMD.
+    (( _zsh_clean_history_pending_histcmd == _zsh_clean_history_recorded_histcmd )) && return 0
+    print -r -- "${_zsh_clean_history_pending_ts}:${code}" >>! "$_zsh_clean_history_exit_file"
+    _zsh_clean_history_recorded_histcmd=$_zsh_clean_history_pending_histcmd
 }
 
 autoload -Uz add-zsh-hook
+add-zsh-hook preexec _zsh_clean_history_record_start
 add-zsh-hook precmd _zsh_clean_history_save_exit
 
 clean-history() {
