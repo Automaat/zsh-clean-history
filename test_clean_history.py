@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Tests for clean_history.py."""
 
+import argparse
+import json
+
 from collections import Counter, defaultdict
+from pathlib import Path
 from unittest.mock import mock_open, patch
 
 import pytest
@@ -14,6 +18,7 @@ from clean_history import (
     _parse_history_file,
     _remove_failed_similar_commands,
     _remove_rare_variants,
+    _write_log,
     find_duplicate_indices,
     get_base_command,
     load_exit_codes,
@@ -455,7 +460,7 @@ def test_main_dry_run(capsys: pytest.CaptureFixture[str]) -> None:
     history_data = ": 1234567890:0;git status\n: 1234567891:0;git status\n"
     exit_data = "1234567890:0\n1234567891:0\n"
 
-    with patch("sys.argv", ["clean_history.py", "--dry-run"]), patch(
+    with patch("sys.argv", ["clean_history.py", "--dry-run", "--no-log"]), patch(
         "clean_history.HISTORY_FILE"
     ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit:
         mock_history.open = mock_open(read_data=history_data)
@@ -474,7 +479,7 @@ def test_main_no_removals(capsys: pytest.CaptureFixture[str]) -> None:
     history_data = ": 1234567890:0;git status\n"
     exit_data = "1234567890:0\n"
 
-    with patch("sys.argv", ["clean_history.py"]), patch(
+    with patch("sys.argv", ["clean_history.py", "--no-log"]), patch(
         "clean_history.HISTORY_FILE"
     ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit, patch("shutil.copy2"):
         mock_history.open = mock_open(read_data=history_data)
@@ -492,7 +497,7 @@ def test_main_quiet_mode(capsys: pytest.CaptureFixture[str]) -> None:
     history_data = ": 1234567890:0;git status\n: 1234567891:0;git status\n"
     exit_data = "1234567890:0\n1234567891:0\n"
 
-    with patch("sys.argv", ["clean_history.py", "--quiet", "--dry-run"]), patch(
+    with patch("sys.argv", ["clean_history.py", "--quiet", "--dry-run", "--no-log"]), patch(
         "clean_history.HISTORY_FILE"
     ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit:
         mock_history.open = mock_open(read_data=history_data)
@@ -510,7 +515,7 @@ def test_main_creates_backup() -> None:
     history_data = ": 1234567890:0;git status\n"
     exit_data = "1234567890:0\n"
 
-    with patch("sys.argv", ["clean_history.py"]), patch(
+    with patch("sys.argv", ["clean_history.py", "--no-log"]), patch(
         "clean_history.HISTORY_FILE"
     ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit, patch(
         "shutil.copy2"
@@ -543,3 +548,96 @@ def test_main_writes_cleaned_history() -> None:
     handle = mock_file_handle()
     written_lines = [call.args[0] for call in handle.write.call_args_list]
     assert len(written_lines) == 2
+
+
+def test_write_log_skipped_with_no_log_flag(tmp_path: Path) -> None:
+    """When --no-log is set, no log file is written."""
+    log_path = tmp_path / "cleanup.log"
+
+    args = argparse.Namespace(no_log=True, dry_run=True)
+    settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=False)
+
+    with patch("clean_history.LOG_FILE", log_path):
+        _write_log(args, settings, total_lines=10, removal_reasons={}, cmd_to_lines={})
+
+    assert not log_path.exists()
+
+
+def test_write_log_writes_jsonl_entry(tmp_path: Path) -> None:
+    """A run produces one well-formed JSONL line with all expected fields."""
+    log_path = tmp_path / "cleanup.log"
+
+    args = argparse.Namespace(no_log=False, dry_run=True)
+    settings = CleaningSettings(similarity_threshold=0.85, rare_threshold=2, remove_rare=True)
+    cmd_to_lines = {"git statsu": [3], "git status": [1, 2]}
+    removal_reasons = {3: "Failed similar to 'git status'"}
+
+    with patch("clean_history.LOG_FILE", log_path):
+        _write_log(
+            args,
+            settings,
+            total_lines=42,
+            removal_reasons=removal_reasons,
+            cmd_to_lines=cmd_to_lines,
+        )
+
+    lines = [line for line in log_path.read_text().splitlines() if line.strip()]
+    assert len(lines) == 1
+
+    entry = json.loads(lines[0])
+    assert entry["dry_run"] is True
+    assert entry["total_lines"] == 42
+    assert entry["removed_count"] == 1
+    assert entry["settings"] == {
+        "similarity": 0.85,
+        "rare_threshold": 2,
+        "remove_rare": True,
+    }
+    assert entry["reason_counts"] == {"Failed similar to 'git status'": 1}
+    assert entry["removals"] == [
+        {"line": 3, "reason": "Failed similar to 'git status'", "command": "git statsu"},
+    ]
+    assert "timestamp" in entry
+
+
+def test_write_log_appends_across_runs(tmp_path: Path) -> None:
+    """Each call appends a new line so the log accumulates over time."""
+    log_path = tmp_path / "cleanup.log"
+
+    args = argparse.Namespace(no_log=False, dry_run=True)
+    settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=False)
+
+    with patch("clean_history.LOG_FILE", log_path):
+        _write_log(args, settings, total_lines=10, removal_reasons={}, cmd_to_lines={})
+        _write_log(args, settings, total_lines=11, removal_reasons={}, cmd_to_lines={})
+
+    lines = [line for line in log_path.read_text().splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert json.loads(lines[0])["total_lines"] == 10
+    assert json.loads(lines[1])["total_lines"] == 11
+
+
+def test_main_writes_log_entry(tmp_path: Path) -> None:
+    """main() produces a log entry by default; record reflects what was processed."""
+    log_path = tmp_path / "cleanup.log"
+    history_data = ": 1234567890:0;git status\n: 1234567891:0;git status\n"
+    exit_data = "1234567890:0\n1234567891:0\n"
+
+    with patch("sys.argv", ["clean_history.py", "--dry-run"]), patch(
+        "clean_history.HISTORY_FILE"
+    ) as mock_history, patch("clean_history.EXIT_FILE") as mock_exit, patch(
+        "clean_history.LOG_FILE", log_path
+    ):
+        mock_history.open = mock_open(read_data=history_data)
+        mock_exit.exists.return_value = True
+        mock_exit.open = mock_open(read_data=exit_data)
+
+        main()
+
+    lines = [line for line in log_path.read_text().splitlines() if line.strip()]
+    assert len(lines) == 1
+    entry = json.loads(lines[0])
+    assert entry["dry_run"] is True
+    assert entry["total_lines"] == 2
+    assert entry["removed_count"] == 1
+    assert entry["reason_counts"] == {"Duplicate": 1}

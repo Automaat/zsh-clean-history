@@ -54,6 +54,7 @@ source ~/.zsh-clean-history/zsh-clean-history.plugin.zsh
 - `clean-history` - Run cleanup now
 - `clean-history-stats` - Show stats without cleaning (dry run)
 - `clean-history-info` - Show plugin configuration and commands
+- `clean-history-log [N]` - Show summary of last N runs (default 5); pass `--full` for raw JSONL
 
 ### Configuration
 
@@ -116,6 +117,22 @@ clean-history --quiet
 - `--rare-threshold INT` - Override rare threshold
 - `--dry-run` - Show what would be removed without changing history
 - `--quiet` / `-q` - Minimal output
+- `--no-log` - Skip writing this run to `~/.zsh_history_cleanup.log`
+
+## Cleanup log
+
+Every run (dry-run or real) appends one JSON line to `~/.zsh_history_cleanup.log`:
+
+```json
+{"timestamp": "...", "dry_run": false, "settings": {...}, "total_lines": 858,
+ "removed_count": 84, "reason_counts": {"Duplicate": 70, ...},
+ "removals": [{"line": 56, "reason": "Failed similar to '...'", "command": "..."}, ...]}
+```
+
+Use `clean-history-log` for a quick summary, `clean-history-log --full` for the raw
+JSONL, or pipe through `jq` for analytics (`jq '.reason_counts | to_entries[]'`,
+trend success/failure rates, audit which commands were dropped, etc.). Pass
+`--no-log` to opt out for a single run.
 
 ## Requirements
 
