@@ -1,35 +1,33 @@
 [tools]
-python = "3.14.4"
+rust = "1.93.1"
 shellcheck = "0.11.0"
 actionlint = "1.7.12"
 
-[env]
-_.python.venv = { path = ".venv", create = true }
+[tasks.build]
+description = "Build release binary"
+run = "cargo build --release"
 
 [tasks.install]
-description = "Install Python dependencies"
-run = ["pip install --upgrade pip", "pip install -r requirements-dev.txt"]
+description = "Install binary to ~/.cargo/bin"
+run = "cargo install --path . --locked"
 
 [tasks.test]
-description = "Run tests"
-run = "python -m pytest -v test_clean_history.py"
+description = "Run all tests"
+run = "cargo test --all-targets"
 
 [tasks.test-cov]
-description = "Run tests with coverage"
-run = "python -m pytest --cov=. --cov-report=xml --cov-report=term test_clean_history.py"
+description = "Run tests with coverage (cargo-llvm-cov required)"
+run = "cargo llvm-cov --all-targets --lcov --output-path lcov.info"
 
 [tasks.check]
-description = "Run linters (ruff, pyrefly, actionlint)"
+description = "Lint, format-check, syntax-check"
 run = [
-  "ruff check *.py",
-  "pyrefly check *.py",
+  "cargo fmt --all -- --check",
+  "cargo clippy --all-targets -- -D warnings",
+  "zsh -n zsh-clean-history.plugin.zsh",
   "actionlint",
 ]
 
-[tasks.lint]
-description = "Run Ruff linter with auto-fix"
-run = "ruff check --fix ."
-
-[tasks.format]
-description = "Format code with Ruff"
-run = "ruff format ."
+[tasks.fmt]
+description = "Format Rust code"
+run = "cargo fmt --all"

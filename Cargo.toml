@@ -1,0 +1,47 @@
+[package]
+name = "zsh-clean-history"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Smart zsh history cleanup: removes typos and failed commands via similarity analysis"
+license = "MIT"
+repository = "https://github.com/automaat/zsh-clean-history"
+readme = "README.md"
+keywords = ["zsh", "history", "cleanup", "shell", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "zsh-clean-history"
+path = "src/main.rs"
+
+[lib]
+name = "zsh_clean_history"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+clap = { version = "4", features = ["derive"] }
+fs2 = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+strsim = "0.11"
+tempfile = "3"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[workspace]
+
+# cargo-dist
+[workspace.metadata.dist]
+cargo-dist-version = "0.28.0"
+ci = ["github"]
+installers = ["shell", "homebrew"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]

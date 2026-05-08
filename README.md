@@ -1,147 +1,119 @@
 # zsh-clean-history
 
-Smart zsh history cleanup plugin that automatically removes typos and failed commands based on similarity analysis.
+Smart zsh history cleanup. Removes typos, failed commands, and duplicates from `~/.zsh_history` based on similarity analysis. Written in Rust.
 
 ## Features
 
-- **Smart cleanup**: Removes failed commands similar to successful ones
-- **Typo detection**: Finds rare commands similar to common variants
-- **Exit code tracking**: Automatically captures command success/failure
-- **Configurable**: Adjust similarity thresholds and behavior
-- **Safe**: Creates backups before cleaning
+- Removes failed commands that are typos of successful ones (Damerau-Levenshtein distance — handles transpositions natively)
+- Removes rare command variants similar to common ones
+- Deduplicates while keeping the most-recent occurrence (Ctrl-R-friendly)
+- Atomic writes with file locking — safe under concurrent shells
+- Timestamped backup rotation, plus `clean-history-undo` to restore the latest
+- JSONL run log at `~/.zsh_history_cleanup.log`
+- Multi-line history entries handled correctly
 
-## Installation
+## Install
 
-### Using zplug
-
-```bash
-# Add to ~/.zshrc
-zplug "automaat/zsh-clean-history", from:github, at:main
-```
-
-### Using zinit
+### Build & install the binary
 
 ```bash
-# Add to ~/.zshrc
-zinit light automaat/zsh-clean-history
-```
-
-### Using oh-my-zsh
-
-```bash
-# Clone to custom plugins
-git clone https://github.com/automaat/zsh-clean-history \
-  ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-clean-history
-
-# Add to plugins in ~/.zshrc
-plugins=(... zsh-clean-history)
-```
-
-### Manual
-
-```bash
-# Clone
 git clone https://github.com/automaat/zsh-clean-history ~/.zsh-clean-history
-
-# Add to ~/.zshrc
-source ~/.zsh-clean-history/zsh-clean-history.plugin.zsh
+cd ~/.zsh-clean-history
+cargo install --path . --locked
 ```
 
-## Usage
+This puts `zsh-clean-history` on your `PATH` (via `~/.cargo/bin`).
 
-### Commands
+### Load the plugin
 
-- `clean-history` - Run cleanup now
-- `clean-history-stats` - Show stats without cleaning (dry run)
-- `clean-history-info` - Show plugin configuration and commands
-- `clean-history-log [N]` - Show summary of last N runs (default 5); pass `--full` for raw JSONL
+#### oh-my-zsh
 
-### Configuration
+```bash
+ln -s ~/.zsh-clean-history ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-clean-history
+# add to plugins=(... zsh-clean-history) in ~/.zshrc
+```
 
-Add before loading plugin in `~/.zshrc`:
+#### Manual
+
+```bash
+echo 'source ~/.zsh-clean-history/zsh-clean-history.plugin.zsh' >> ~/.zshrc
+```
+
+The plugin auto-finds the binary on `PATH`, or falls back to `target/release/zsh-clean-history` inside the plugin dir.
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `clean-history` | Run cleanup |
+| `clean-history-stats` | Dry run (no writes) |
+| `clean-history-undo` | Restore the most recent backup |
+| `clean-history-info` | Show config |
+| `clean-history-log [N]` | Summarize last N runs (`--full` for raw JSONL) |
+
+## Configuration
 
 ```bash
 # Auto-clean on shell exit (default: false)
 ZSH_CLEAN_HISTORY_AUTO_CLEAN=true
 
-# Similarity threshold 0-1 (default: 0.8)
+# Similarity threshold 0..1 (default: 0.8)
 ZSH_CLEAN_HISTORY_SIMILARITY=0.85
 
-# Max occurrences to consider "rare" (default: 3)
+# Max occurrences considered "rare" (default: 3)
 ZSH_CLEAN_HISTORY_RARE_THRESHOLD=2
 
-# Load plugin
-zplug "automaat/zsh-clean-history", from:github
+# Override binary location (default: search PATH, then plugin's target/)
+ZSH_CLEAN_HISTORY_BIN=/path/to/zsh-clean-history
 ```
 
-### Examples
+## CLI flags
 
-```bash
-# Run cleanup manually
-clean-history
-
-# Preview what would be removed
-clean-history-stats
-
-# See current configuration
-clean-history-info
-
-# Run with custom settings
-clean-history --similarity 0.9 --rare-threshold 5
-
-# Silent cleanup
-clean-history --quiet
+```
+zsh-clean-history [--similarity F] [--rare-threshold N]
+                  [--dry-run] [--quiet] [--remove-rare] [--no-log]
+zsh-clean-history undo
+zsh-clean-history record-exit <timestamp> <code>
 ```
 
 ## How it works
 
-1. **Exit code tracking**: Plugin captures exit codes for all commands
-2. **Analysis**: Python script analyzes history to find:
-   - Failed commands similar to successful ones (likely typos)
-   - Rare commands similar to common ones (likely misspellings)
-3. **Smart removal**: Removes problematic entries while preserving history
-
-## Configuration options
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ZSH_CLEAN_HISTORY_AUTO_CLEAN` | `false` | Auto-clean on shell exit |
-| `ZSH_CLEAN_HISTORY_SIMILARITY` | `0.8` | Similarity threshold (0-1) |
-| `ZSH_CLEAN_HISTORY_RARE_THRESHOLD` | `3` | Max count for "rare" commands |
-
-### Command-line flags
-
-- `--similarity FLOAT` - Override similarity threshold
-- `--rare-threshold INT` - Override rare threshold
-- `--dry-run` - Show what would be removed without changing history
-- `--quiet` / `-q` - Minimal output
-- `--no-log` - Skip writing this run to `~/.zsh_history_cleanup.log`
+1. Plugin's `precmd` hook appends `<timestamp>:<exit-code>` to `~/.zsh_history_exits` for every command.
+2. On cleanup, `zsh-clean-history`:
+   - Locks `~/.zsh_history` (`flock`),
+   - Parses entries (multi-line aware) and joins with exit codes,
+   - Identifies removals via three strategies:
+     - **Duplicate** — keep newest occurrence,
+     - **Failed prefix / similar** — failed commands that are typos of successful ones,
+     - **Rare variant** *(opt-in via `--remove-rare`)* — uncommon spellings of common commands,
+   - Writes a timestamped backup,
+   - Writes the cleaned history atomically (`tempfile` + `rename`),
+   - Compacts `~/.zsh_history_exits` to drop entries for now-deleted commands.
 
 ## Cleanup log
 
-Every run (dry-run or real) appends one JSON line to `~/.zsh_history_cleanup.log`
-(created with mode `0600` on first write, since entries embed command text):
+Each run appends one JSON line to `~/.zsh_history_cleanup.log` (chmod `0600`):
 
 ```json
-{"timestamp": "...", "dry_run": false, "settings": {...}, "total_lines": 858,
- "removed_count": 84, "reason_counts": {"Duplicate": 70, ...},
- "removals": [{"line": 56, "reason": "Failed similar to '...'", "command": "..."}, ...]}
+{"timestamp":"2026-05-08T11:32:00Z","dry_run":false,"settings":{"similarity":0.8,"rare_threshold":3,"remove_rare":false},"total_lines":858,"removed_count":84,"reason_counts":{"Duplicate":70,"Failed similar to 'git status'":2},"removals":[{"line":56,"reason":"Failed similar to 'git status'","command":"git statsu"}]}
 ```
 
-`removals[].line` is the **0-based index** into the parsed `~/.zsh_history`
-file (matches Python's `enumerate`, so the first command is `0`).
+`removals[].line` is the 0-based index in the parsed history.
 
-Use `clean-history-log` for a quick summary, `clean-history-log --full` for the raw
-JSONL, or pipe through `jq` for analytics (`jq '.reason_counts | to_entries[]'`,
-trend success/failure rates, audit which commands were dropped, etc.). Pass
-`--no-log` to opt out for a single run.
+`clean-history-log` summarises recent runs; `clean-history-log --full` dumps raw JSONL. Pipe through `jq` for analytics.
+
+## Development
+
+```bash
+mise run install   # cargo install --path .
+mise run test      # cargo test --all-targets
+mise run check     # fmt-check + clippy + zsh -n + actionlint
+```
 
 ## Requirements
 
 - zsh
-- Python 3.6+
+- Rust 1.85+ to build
 
 ## License
 
