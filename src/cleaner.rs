@@ -45,7 +45,7 @@ pub fn identify_removals(
         .collect();
     out.sort_by_key(|r| r.line);
     if let Some(set) = allowlist {
-        out.retain(|r| !set.is_match(&r.command));
+        out.retain(|r| r.reason.starts_with("Secret pattern:") || !set.is_match(&r.command));
     }
     out
 }
@@ -388,5 +388,18 @@ mod tests {
         let allowlist = RegexSet::new(["^kubectl "]).unwrap();
         let with_list = identify_removals(&h, &CleaningSettings::default(), Some(&allowlist));
         assert!(with_list.is_empty());
+    }
+
+    #[test]
+    fn allowlist_does_not_suppress_secret_removals() {
+        // ^export matches, but the command contains a secret — must still be removed
+        let h = parse_with_exits(
+            ": 1:0;export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY\n",
+            &[("1", 0)],
+        );
+        let allowlist = RegexSet::new(["^export "]).unwrap();
+        let removals = identify_removals(&h, &CleaningSettings::default(), Some(&allowlist));
+        assert_eq!(removals.len(), 1);
+        assert!(removals[0].reason.starts_with("Secret pattern:"));
     }
 }
