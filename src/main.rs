@@ -72,7 +72,7 @@ fn do_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
             println!("\n{action} {} lines:", report.removals.len());
             let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
             for r in &report.removals {
-                *counts.entry(r.reason.as_str()).or_default() += 1;
+                *counts.entry(&*r.reason).or_default() += 1;
             }
             let mut entries: Vec<_> = counts.into_iter().collect();
             entries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
@@ -82,7 +82,7 @@ fn do_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
                     for sample in report
                         .removals
                         .iter()
-                        .filter(|r| r.reason.as_str() == *reason)
+                        .filter(|r| &*r.reason == *reason)
                         .take(5)
                     {
                         println!("    {}", truncate_cmd(&sample.command, 70));

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bk_tree::BKTree;
@@ -50,7 +51,7 @@ pub fn identify_removals(
     settings: &CleaningSettings,
     allowlist: Option<&RegexSet>,
 ) -> Vec<Removal> {
-    let mut removals: HashMap<usize, String> = HashMap::new();
+    let mut removals: HashMap<usize, Arc<str>> = HashMap::new();
     dedup_keep_newest(parsed, &mut removals);
     mark_secrets(parsed, &mut removals);
     failed_similar_to_successful(parsed, settings, &mut removals);
@@ -68,7 +69,7 @@ pub fn identify_removals(
                 .unwrap_or_default();
             Removal {
                 line: idx,
-                reason,
+                reason: reason.to_string(),
                 command,
             }
         })
@@ -80,7 +81,8 @@ pub fn identify_removals(
     out
 }
 
-fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
+fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, Arc<str>>) {
+    let duplicate: Arc<str> = Arc::from("Duplicate");
     for (cmd, indices) in &parsed.cmd_to_lines {
         if indices.len() <= 1 {
             continue;
@@ -90,7 +92,7 @@ fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, Strin
             if idx != keep {
                 removals
                     .entry(idx)
-                    .or_insert_with(|| "Duplicate".to_string());
+                    .or_insert_with(|| Arc::clone(&duplicate));
             }
         }
     }
@@ -99,7 +101,7 @@ fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, Strin
 fn failed_similar_to_successful(
     parsed: &ParsedHistory,
     settings: &CleaningSettings,
-    removals: &mut HashMap<usize, String>,
+    removals: &mut HashMap<usize, Arc<str>>,
 ) {
     let by_base = group_by_base(parsed.successful_counts.keys());
     let indices = build_bucket_indices(&by_base);
@@ -112,7 +114,7 @@ fn failed_similar_to_successful(
         };
 
         // Phase 1: prefix probe via sorted vec — O(log n + k)
-        let mut chosen: Option<String> = None;
+        let mut chosen: Option<Arc<str>> = None;
         let start = index
             .sorted
             .partition_point(|s| s.as_str() < failed_cmd.as_str());
@@ -129,7 +131,9 @@ fn failed_similar_to_successful(
                 .copied()
                 .unwrap_or(0);
             if success_count > fail_count {
-                chosen = Some(format!("Failed prefix of '{success_cmd}'"));
+                chosen = Some(Arc::from(
+                    format!("Failed prefix of '{success_cmd}'").as_str(),
+                ));
                 break 'prefix;
             }
         }
@@ -150,7 +154,9 @@ fn failed_similar_to_successful(
                     continue;
                 }
                 if command_similar(failed_cmd, success_cmd, settings.similarity_threshold) {
-                    chosen = Some(format!("Failed similar to '{success_cmd}'"));
+                    chosen = Some(Arc::from(
+                        format!("Failed similar to '{success_cmd}'").as_str(),
+                    ));
                     break;
                 }
             }
@@ -159,14 +165,14 @@ fn failed_similar_to_successful(
         if let Some(reason) = chosen {
             if let Some(line_indices) = parsed.cmd_to_lines.get(failed_cmd) {
                 for &idx in line_indices {
-                    removals.entry(idx).or_insert_with(|| reason.clone());
+                    removals.entry(idx).or_insert_with(|| Arc::clone(&reason));
                 }
             }
         }
     }
 }
 
-fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
+fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, Arc<str>>) {
     // Total counts (success + failed) per base for the common-base threshold.
     // Failed runs of a legitimate tool (e.g. `git log` returning non-zero) contribute
     // to making that base "common"; they are not typos of the base itself.
@@ -205,7 +211,7 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String
 
     for rare in rare_bases {
         if let Some((common, _)) = common_bases.iter().find(|(c, _)| bases_within_dl1(rare, c)) {
-            let reason = format!("Cross-base typo of '{common}'");
+            let reason: Arc<str> = Arc::from(format!("Cross-base typo of '{common}'").as_str());
             for (cmd, idxs) in &parsed.cmd_to_lines {
                 if base_command(cmd) == rare {
                     // Only remove if this specific command has no successful runs —
@@ -214,7 +220,7 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String
                         continue;
                     }
                     for &idx in idxs {
-                        removals.entry(idx).or_insert_with(|| reason.clone());
+                        removals.entry(idx).or_insert_with(|| Arc::clone(&reason));
                     }
                 }
             }
@@ -238,7 +244,7 @@ fn time_decay_weight(timestamp_secs: i64, now_secs: i64) -> f64 {
 fn rare_variants(
     parsed: &ParsedHistory,
     settings: &CleaningSettings,
-    removals: &mut HashMap<usize, String>,
+    removals: &mut HashMap<usize, Arc<str>>,
 ) {
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -274,9 +280,10 @@ fn rare_variants(
             }
             if command_similar(rare_cmd, common_cmd, settings.similarity_threshold) {
                 if let Some(indices) = parsed.cmd_to_lines.get(rare_cmd) {
-                    let reason = format!("Rare variant of '{common_cmd}'");
+                    let reason: Arc<str> =
+                        Arc::from(format!("Rare variant of '{common_cmd}'").as_str());
                     for &idx in indices {
-                        removals.entry(idx).or_insert_with(|| reason.clone());
+                        removals.entry(idx).or_insert_with(|| Arc::clone(&reason));
                     }
                 }
                 break;
@@ -322,7 +329,7 @@ mod tests {
         let removals = identify_removals(&h, &CleaningSettings::default(), None);
         let lines: Vec<usize> = removals.iter().map(|r| r.line).collect();
         assert_eq!(lines, vec![0, 2]);
-        assert!(removals.iter().all(|r| r.reason == "Duplicate"));
+        assert!(removals.iter().all(|r| &*r.reason == "Duplicate"));
     }
 
     #[test]
@@ -502,7 +509,7 @@ mod tests {
         // line 20 (index) is the older gti status → must be Duplicate, not Cross-base typo
         let dup = removals
             .iter()
-            .find(|r| r.command == "gti status" && r.reason == "Duplicate");
+            .find(|r| r.command == "gti status" && &*r.reason == "Duplicate");
         assert!(
             dup.is_some(),
             "older gti status should remain Duplicate; removals: {removals:?}"
