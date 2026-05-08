@@ -10,8 +10,8 @@ use fs2::FileExt;
 use tempfile::NamedTempFile;
 use zsh_clean_history::cleaner::Removal;
 use zsh_clean_history::{
-    CleaningSettings, Paths, compact_exits_file, identify_removals, load_exit_codes,
-    parse_history_file, write_log_entry,
+    CleaningSettings, DEFAULT_LOG_MAX_BYTES, Paths, compact_exits_file, identify_removals,
+    load_exit_codes, parse_history_file, write_log_entry,
 };
 
 #[derive(Parser)]
@@ -33,6 +33,8 @@ struct Cli {
     remove_rare: bool,
     #[arg(long)]
     no_log: bool,
+    #[arg(long, default_value_t = DEFAULT_LOG_MAX_BYTES)]
+    log_max_bytes: u64,
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -105,8 +107,14 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
     }
 
     if !cli.no_log {
-        if let Err(e) = write_log_entry(&paths.log, &settings, cli.dry_run, total_lines, &removals)
-        {
+        if let Err(e) = write_log_entry(
+            &paths.log,
+            &settings,
+            cli.dry_run,
+            total_lines,
+            &removals,
+            cli.log_max_bytes,
+        ) {
             eprintln!("warning: could not write log: {e}");
         }
     }
