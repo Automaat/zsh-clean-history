@@ -1,13 +1,56 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bk_tree::BKTree;
 use regex::RegexSet;
 use serde::Serialize;
+use strsim::damerau_levenshtein;
 
 use crate::history::ParsedHistory;
 use crate::secrets::mark_secrets;
 use crate::settings::CleaningSettings;
-use crate::similarity::{base_command, command_similar};
+use crate::similarity::{base_command, bases_within_dl1, command_similar};
+
+struct DLMetric;
+
+impl bk_tree::Metric<String> for DLMetric {
+    fn distance(&self, a: &String, b: &String) -> u32 {
+        damerau_levenshtein(a, b) as u32
+    }
+}
+
+struct SuccessBucketIndex {
+    sorted: Vec<String>,
+    tree: BKTree<String, DLMetric>,
+}
+
+impl SuccessBucketIndex {
+    fn build(commands: &[&str]) -> Self {
+        let mut sorted: Vec<String> = commands.iter().map(|s| (*s).to_string()).collect();
+        sorted.sort_unstable();
+        let mut tree = BKTree::new(DLMetric);
+        for cmd in &sorted {
+            tree.add(cmd.clone());
+        }
+        Self { sorted, tree }
+    }
+}
+
+fn build_bucket_indices<'a>(
+    by_base: &HashMap<&'a str, Vec<&'a str>>,
+) -> HashMap<&'a str, SuccessBucketIndex> {
+    by_base
+        .iter()
+        .map(|(&base, cmds)| (base, SuccessBucketIndex::build(cmds)))
+        .collect()
+}
+
+fn bk_radius(threshold: f64, query_char_count: usize) -> u32 {
+    if threshold >= 1.0 || query_char_count == 0 {
+        return 0;
+    }
+    ((1.0 - threshold) / threshold * query_char_count as f64).ceil() as u32
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Removal {
@@ -25,6 +68,7 @@ pub fn identify_removals(
     dedup_keep_newest(parsed, &mut removals);
     mark_secrets(parsed, &mut removals);
     failed_similar_to_successful(parsed, settings, &mut removals);
+    cross_base_typos(parsed, &mut removals);
     if settings.remove_rare {
         rare_variants(parsed, settings, &mut removals);
     }
@@ -72,15 +116,25 @@ fn failed_similar_to_successful(
     removals: &mut HashMap<usize, String>,
 ) {
     let by_base = group_by_base_strings(parsed.successful_counts.keys());
+    let indices = build_bucket_indices(&by_base);
+
     for (failed_cmd, &fail_count) in &parsed.failed_counts {
         let base = base_command(failed_cmd);
-        let candidates = match by_base.get(base) {
-            Some(v) => v,
+        let index = match indices.get(base) {
+            Some(idx) => idx,
             None => continue,
         };
+
+        // Phase 1: prefix probe via sorted vec — O(log n + k)
         let mut chosen: Option<String> = None;
-        for &success_cmd in candidates {
-            if success_cmd == failed_cmd {
+        let start = index
+            .sorted
+            .partition_point(|s| s.as_str() < failed_cmd.as_str());
+        'prefix: for success_cmd in &index.sorted[start..] {
+            if !success_cmd.starts_with(failed_cmd.as_str()) {
+                break;
+            }
+            if success_cmd.len() <= failed_cmd.len() {
                 continue;
             }
             let success_count = parsed
@@ -88,23 +142,74 @@ fn failed_similar_to_successful(
                 .get(success_cmd)
                 .copied()
                 .unwrap_or(0);
-            if success_count <= fail_count {
-                continue;
-            }
-            if success_cmd.starts_with(failed_cmd.as_str()) && success_cmd.len() > failed_cmd.len()
-            {
+            if success_count > fail_count {
                 chosen = Some(format!("Failed prefix of '{success_cmd}'"));
-                break;
-            }
-            if command_similar(failed_cmd, success_cmd, settings.similarity_threshold) {
-                chosen = Some(format!("Failed similar to '{success_cmd}'"));
-                break;
+                break 'prefix;
             }
         }
+
+        // Phase 2: BK-tree similarity probe — prunes via triangle inequality
+        if chosen.is_none() {
+            let radius = bk_radius(settings.similarity_threshold, failed_cmd.chars().count());
+            for (_, success_cmd) in index.tree.find(failed_cmd, radius) {
+                if success_cmd == failed_cmd {
+                    continue;
+                }
+                let success_count = parsed
+                    .successful_counts
+                    .get(success_cmd)
+                    .copied()
+                    .unwrap_or(0);
+                if success_count <= fail_count {
+                    continue;
+                }
+                if command_similar(failed_cmd, success_cmd, settings.similarity_threshold) {
+                    chosen = Some(format!("Failed similar to '{success_cmd}'"));
+                    break;
+                }
+            }
+        }
+
         if let Some(reason) = chosen {
-            if let Some(indices) = parsed.cmd_to_lines.get(failed_cmd) {
-                for &idx in indices {
+            if let Some(line_indices) = parsed.cmd_to_lines.get(failed_cmd) {
+                for &idx in line_indices {
                     removals.entry(idx).or_insert_with(|| reason.clone());
+                }
+            }
+        }
+    }
+}
+
+fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
+    let mut base_counts: HashMap<&str, usize> = HashMap::new();
+    for (cmd, &n) in parsed
+        .successful_counts
+        .iter()
+        .chain(parsed.failed_counts.iter())
+    {
+        *base_counts.entry(base_command(cmd)).or_default() += n;
+    }
+
+    let rare_bases: Vec<&str> = base_counts
+        .iter()
+        .filter(|(_, &c)| c <= 2)
+        .map(|(&b, _)| b)
+        .collect();
+    let mut common_bases: Vec<(&str, usize)> = base_counts
+        .iter()
+        .filter(|(_, &c)| c >= 20)
+        .map(|(&b, &c)| (b, c))
+        .collect();
+    common_bases.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+
+    for rare in rare_bases {
+        if let Some((common, _)) = common_bases.iter().find(|(c, _)| bases_within_dl1(rare, c)) {
+            let reason = format!("Cross-base typo of '{common}'");
+            for (cmd, idxs) in &parsed.cmd_to_lines {
+                if base_command(cmd) == rare {
+                    for &idx in idxs {
+                        removals.entry(idx).or_insert_with(|| reason.clone());
+                    }
                 }
             }
         }
@@ -280,6 +385,234 @@ mod tests {
         assert!(hit);
     }
 
+    fn build_cross_base_history(
+        _common_base: &str,
+        common_cmd: &str,
+        common_n: usize,
+        rare_cmds: &[&str],
+    ) -> (String, Vec<(String, i32)>) {
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=common_n {
+            text.push_str(&format!(": {i}:0;{common_cmd}\n"));
+            exits.push((i.to_string(), 0));
+        }
+        let base = common_n + 1;
+        for (j, cmd) in rare_cmds.iter().enumerate() {
+            let ts = base + j;
+            text.push_str(&format!(": {ts}:0;{cmd}\n"));
+            exits.push((ts.to_string(), 0));
+        }
+        (text, exits)
+    }
+
+    #[test]
+    fn cross_base_typo_flagged() {
+        let (text, exits) = build_cross_base_history("git", "git status", 20, &["gti status"]);
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let hit = removals
+            .iter()
+            .any(|r| r.command == "gti status" && r.reason.contains("Cross-base typo of 'git'"));
+        assert!(hit, "gti status should be flagged; removals: {removals:?}");
+    }
+
+    #[test]
+    fn cross_base_all_commands_flagged() {
+        let (text, exits) =
+            build_cross_base_history("git", "git status", 20, &["gti status", "gti log"]);
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let flagged: Vec<&str> = removals
+            .iter()
+            .filter(|r| r.reason.contains("Cross-base typo of 'git'"))
+            .map(|r| r.command.as_str())
+            .collect();
+        assert!(
+            flagged.contains(&"gti status"),
+            "gti status missing; removals: {removals:?}"
+        );
+        assert!(
+            flagged.contains(&"gti log"),
+            "gti log missing; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn cross_base_no_false_positive_short_cmds() {
+        // cd (count=20) vs mv (count=1) — DL distance 2, must NOT flag mv
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=20usize {
+            text.push_str(&format!(": {i}:0;cd /home\n"));
+            exits.push((i.to_string(), 0));
+        }
+        text.push_str(": 21:0;mv foo bar\n");
+        exits.push(("21".to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let flagged = removals
+            .iter()
+            .any(|r| r.reason.contains("Cross-base typo"));
+        assert!(!flagged, "mv should not be flagged; removals: {removals:?}");
+    }
+
+    #[test]
+    fn cross_base_does_not_override_existing() {
+        // gti status appears twice → first gets Duplicate; cross-base should not override
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=20usize {
+            text.push_str(&format!(": {i}:0;git status\n"));
+            exits.push((i.to_string(), 0));
+        }
+        text.push_str(": 21:0;gti status\n");
+        text.push_str(": 22:0;gti status\n");
+        exits.push(("21".to_string(), 0));
+        exits.push(("22".to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        // line 20 (index) is the older gti status → must be Duplicate, not Cross-base typo
+        let dup = removals
+            .iter()
+            .find(|r| r.command == "gti status" && r.reason == "Duplicate");
+        assert!(
+            dup.is_some(),
+            "older gti status should remain Duplicate; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn cross_base_rare_threshold_boundary() {
+        // rare base has count=3 → threshold is <=2, so must NOT be flagged
+        let (text, exits) = build_cross_base_history(
+            "git",
+            "git status",
+            20,
+            &["gti status", "gti log", "gti diff"],
+        );
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        // gti base total=3 > 2 → not flagged
+        let flagged = removals
+            .iter()
+            .any(|r| r.reason.contains("Cross-base typo"));
+        assert!(
+            !flagged,
+            "base with count=3 should not be flagged; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn cross_base_common_threshold_boundary() {
+        // common base has count=19 → threshold is >=20, so must NOT flag rare
+        let (text, exits) = build_cross_base_history("git", "git status", 19, &["gti status"]);
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let flagged = removals
+            .iter()
+            .any(|r| r.reason.contains("Cross-base typo"));
+        assert!(
+            !flagged,
+            "common base with count=19 should not trigger; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn cross_base_deterministic_tie_break() {
+        // Two common bases at distance 1 from rare: "xit" (count=25) and "zit" (count=25)
+        // Rare: "git" (count=1). Lex tie-break: "xit" < "zit" → always "xit"
+        // Actually let's use different counts to make it clear: "xit"=30, "zit"=25
+        // So highest count wins → "xit"
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=30usize {
+            text.push_str(&format!(": {i}:0;xit foo\n"));
+            exits.push((i.to_string(), 0));
+        }
+        for i in 31..=55usize {
+            text.push_str(&format!(": {i}:0;zit foo\n"));
+            exits.push((i.to_string(), 0));
+        }
+        text.push_str(": 56:0;git status\n");
+        exits.push(("56".to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let cross = removals
+            .iter()
+            .find(|r| r.command == "git status" && r.reason.contains("Cross-base typo"));
+        assert!(
+            cross.is_some(),
+            "git status should be flagged; removals: {removals:?}"
+        );
+        assert!(
+            cross.unwrap().reason.contains("'xit'"),
+            "should pick xit (higher count); removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn cross_base_aggregation_by_base() {
+        // git status (12) + git commit (8) → git base total=20; gti status (1) should be flagged
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=12usize {
+            text.push_str(&format!(": {i}:0;git status\n"));
+            exits.push((i.to_string(), 0));
+        }
+        for i in 13..=20usize {
+            text.push_str(&format!(": {i}:0;git commit\n"));
+            exits.push((i.to_string(), 0));
+        }
+        text.push_str(": 21:0;gti status\n");
+        exits.push(("21".to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let hit = removals
+            .iter()
+            .any(|r| r.command == "gti status" && r.reason.contains("Cross-base typo of 'git'"));
+        assert!(
+            hit,
+            "gti status should be flagged (git total=20 via aggregation); removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn cross_base_includes_failed_counts() {
+        // 10 git status (successful) + 10 git log (failed) = git base total=20
+        // gti status (1, successful) should be flagged
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=10usize {
+            text.push_str(&format!(": {i}:0;git status\n"));
+            exits.push((i.to_string(), 0));
+        }
+        for i in 11..=20usize {
+            text.push_str(&format!(": {i}:0;git log\n"));
+            exits.push((i.to_string(), 1));
+        }
+        text.push_str(": 21:0;gti status\n");
+        exits.push(("21".to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let hit = removals
+            .iter()
+            .any(|r| r.command == "gti status" && r.reason.contains("Cross-base typo of 'git'"));
+        assert!(
+            hit,
+            "gti status should be flagged (git total=20 via failed counts); removals: {removals:?}"
+        );
+    }
+
     #[test]
     fn time_decay_weight_buckets() {
         let now = 1_000_000_000i64;
@@ -376,7 +709,6 @@ mod tests {
 
     #[test]
     fn allowlist_protects_matching_commands() {
-        // Without allowlist: duplicate kubectl is removed
         let h = parse_with_exits(
             ": 1:0;kubectl get pods\n: 2:0;kubectl get pods\n",
             &[("1", 0), ("2", 0)],
@@ -384,7 +716,6 @@ mod tests {
         let without = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(without.len(), 1);
 
-        // With allowlist matching ^kubectl: nothing removed
         let allowlist = RegexSet::new(["^kubectl "]).unwrap();
         let with_list = identify_removals(&h, &CleaningSettings::default(), Some(&allowlist));
         assert!(with_list.is_empty());
@@ -392,7 +723,6 @@ mod tests {
 
     #[test]
     fn allowlist_does_not_suppress_secret_removals() {
-        // ^export matches, but the command contains a secret — must still be removed
         let h = parse_with_exits(
             ": 1:0;export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY\n",
             &[("1", 0)],
@@ -401,5 +731,260 @@ mod tests {
         let removals = identify_removals(&h, &CleaningSettings::default(), Some(&allowlist));
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.starts_with("Secret pattern:"));
+    }
+
+    // --- bk_radius edge cases ---
+
+    #[test]
+    fn bk_radius_threshold_one() {
+        assert_eq!(bk_radius(1.0, 10), 0);
+    }
+
+    #[test]
+    fn bk_radius_threshold_half() {
+        // ceil((0.5/0.5) * 10) = ceil(10.0) = 10
+        assert_eq!(bk_radius(0.5, 10), 10);
+    }
+
+    #[test]
+    fn bk_radius_empty_query() {
+        assert_eq!(bk_radius(0.8, 0), 0);
+    }
+
+    #[test]
+    fn bk_radius_single_char() {
+        // ceil((0.2/0.8) * 1) = ceil(0.25) = 1
+        assert_eq!(bk_radius(0.8, 1), 1);
+    }
+
+    #[test]
+    fn bk_radius_non_ascii_char_count() {
+        // "café" = 4 chars, 5 bytes; radius must use char count
+        let query = "café";
+        let char_count = query.chars().count();
+        assert_eq!(char_count, 4);
+        // ceil((0.2/0.8) * 4) = ceil(1.0) = 1
+        assert_eq!(bk_radius(0.8, char_count), 1);
+    }
+
+    // --- parity / behavioral oracle ---
+
+    #[test]
+    fn parity_linear_vs_indexed() {
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        let mut ts = 1u64;
+
+        let push_line = |text: &mut String,
+                         exits: &mut Vec<(String, i32)>,
+                         ts: &mut u64,
+                         cmd: &str,
+                         exit: i32| {
+            text.push_str(&format!(": {ts}:0;{cmd}\n"));
+            exits.push((ts.to_string(), exit));
+            *ts += 1;
+        };
+
+        for _ in 0..5 {
+            push_line(&mut text, &mut exits, &mut ts, "git status", 0);
+        }
+        for _ in 0..5 {
+            push_line(&mut text, &mut exits, &mut ts, "git commit", 0);
+        }
+        push_line(&mut text, &mut exits, &mut ts, "git statsu", 1);
+        push_line(&mut text, &mut exits, &mut ts, "git co", 1);
+        for _ in 0..5 {
+            push_line(
+                &mut text,
+                &mut exits,
+                &mut ts,
+                "git push origin feature-2",
+                0,
+            );
+        }
+        push_line(
+            &mut text,
+            &mut exits,
+            &mut ts,
+            "git push origin feature-1",
+            1,
+        );
+        push_line(
+            &mut text,
+            &mut exits,
+            &mut ts,
+            "git completely-unrelated-xyz",
+            1,
+        );
+        push_line(&mut text, &mut exits, &mut ts, "git logg", 0);
+        push_line(&mut text, &mut exits, &mut ts, "git logg", 1);
+
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+
+        let removed_cmds: Vec<&str> = removals.iter().map(|r| r.command.as_str()).collect();
+
+        assert!(
+            removals
+                .iter()
+                .any(|r| r.command == "git statsu" && r.reason.contains("Failed similar")),
+            "git statsu not removed; removals: {removals:?}"
+        );
+        assert!(
+            removals
+                .iter()
+                .any(|r| r.command == "git co" && r.reason.contains("Failed prefix")),
+            "git co not removed as prefix; removals: {removals:?}"
+        );
+
+        assert!(
+            !removals
+                .iter()
+                .any(|r| r.command == "git push origin feature-1"
+                    && (r.reason.contains("Failed similar") || r.reason.contains("Failed prefix"))),
+            "git push origin feature-1 incorrectly removed; removals: {removals:?}"
+        );
+        assert!(
+            !removals
+                .iter()
+                .any(|r| r.command == "git completely-unrelated-xyz"
+                    && (r.reason.contains("Failed similar") || r.reason.contains("Failed prefix"))),
+            "git completely-unrelated-xyz incorrectly removed; removed_cmds: {removed_cmds:?}"
+        );
+        assert!(
+            !removals.iter().any(|r| r.command == "git logg"
+                && (r.reason.contains("Failed similar") || r.reason.contains("Failed prefix"))),
+            "git logg incorrectly removed (equal counts); removals: {removals:?}"
+        );
+    }
+
+    // --- BK-tree regression tests ---
+
+    #[test]
+    fn bk_tree_finds_typo_in_large_bucket() {
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        let mut ts = 1u64;
+        let subcommands = [
+            "git status",
+            "git commit",
+            "git log",
+            "git diff",
+            "git push",
+            "git pull",
+            "git fetch",
+            "git rebase",
+            "git merge",
+            "git stash",
+            "git branch",
+            "git checkout",
+            "git add",
+            "git reset",
+            "git clean",
+            "git clone",
+            "git remote",
+            "git tag",
+            "git show",
+            "git blame",
+            "git bisect",
+            "git cherry-pick",
+            "git describe",
+            "git format-patch",
+            "git am",
+            "git apply",
+            "git archive",
+            "git bundle",
+            "git cat-file",
+            "git check-attr",
+            "git check-ignore",
+            "git check-mailmap",
+            "git check-ref-format",
+            "git column",
+            "git config",
+            "git credential",
+            "git cvsexportcommit",
+            "git daemon",
+            "git fast-export",
+            "git fast-import",
+            "git filter-branch",
+            "git gc",
+            "git get-tar-commit-id",
+            "git grep",
+            "git hash-object",
+            "git help",
+            "git instaweb",
+            "git interpret-trailers",
+            "git log",
+            "git ls-files",
+        ];
+        for cmd in &subcommands {
+            for _ in 0..3 {
+                text.push_str(&format!(": {ts}:0;{cmd}\n"));
+                exits.push((ts.to_string(), 0));
+                ts += 1;
+            }
+        }
+        text.push_str(&format!(": {ts}:0;git statsu\n"));
+        exits.push((ts.to_string(), 1));
+
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(
+            removals
+                .iter()
+                .any(|r| r.command == "git statsu" && r.reason.contains("Failed similar")),
+            "BK-tree missed typo in large bucket; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn bk_tree_prefix_found_without_similarity() {
+        let h = parse_with_exits(
+            ": 1:0;mise install\n: 2:0;mise install\n: 3:0;mise ins\n",
+            &[("1", 0), ("2", 0), ("3", 1)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(
+            removals
+                .iter()
+                .any(|r| r.command == "mise ins" && r.reason.contains("Failed prefix")),
+            "prefix path missed; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn bk_tree_success_count_guard_blocks_removal() {
+        let h = parse_with_exits(
+            ": 1:0;git status\n: 2:0;git status\n: 3:0;git statsu\n: 4:0;git statsu\n",
+            &[("1", 0), ("2", 0), ("3", 1), ("4", 1)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(
+            !removals.iter().any(|r| r.command == "git statsu"
+                && (r.reason.contains("Failed similar") || r.reason.contains("Failed prefix"))),
+            "equal counts incorrectly triggered removal; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn bk_tree_empty_command_no_panic() {
+        assert_eq!(bk_radius(0.8, 0), 0);
+    }
+
+    #[test]
+    fn bk_tree_non_ascii_similarity() {
+        let h = parse_with_exits(
+            ": 1:0;café status\n: 2:0;café status\n: 3:0;café statsu\n",
+            &[("1", 0), ("2", 0), ("3", 1)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(
+            removals
+                .iter()
+                .any(|r| r.command == "café statsu" && r.reason.contains("Failed similar")),
+            "non-ASCII similarity missed; removals: {removals:?}"
+        );
     }
 }

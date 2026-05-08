@@ -135,3 +135,48 @@ fn dry_run_verbose_shows_sample_removals() {
         .stdout(predicates::str::contains("Failed similar to 'git status'"))
         .stdout(predicates::str::contains("git statsu"));
 }
+
+#[test]
+fn cross_base_typo_removed_in_cleanup() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+
+    let mut history = String::new();
+    let mut exits = String::new();
+    for i in 1..=20usize {
+        history.push_str(&format!(": {i}:0;git status\n"));
+        exits.push_str(&format!("{i}:0\n"));
+    }
+    history.push_str(": 21:0;gti status\n");
+    exits.push_str("21:0\n");
+
+    fs::write(home.join(".zsh_history"), &history).unwrap();
+    fs::write(home.join(".zsh_history_exits"), &exits).unwrap();
+
+    run(home, &["--dry-run"])
+        .success()
+        .stdout(predicates::str::contains("gti status"))
+        .stdout(predicates::str::contains("Cross-base typo of 'git'"));
+}
+
+#[test]
+fn cross_base_typo_explain() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+
+    let mut history = String::new();
+    let mut exits = String::new();
+    for i in 1..=20usize {
+        history.push_str(&format!(": {i}:0;git status\n"));
+        exits.push_str(&format!("{i}:0\n"));
+    }
+    history.push_str(": 21:0;gti status\n");
+    exits.push_str("21:0\n");
+
+    fs::write(home.join(".zsh_history"), &history).unwrap();
+    fs::write(home.join(".zsh_history_exits"), &exits).unwrap();
+
+    run(home, &["explain", "gti status"])
+        .success()
+        .stdout(predicates::str::contains("Cross-base typo of 'git'"));
+}

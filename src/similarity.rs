@@ -70,6 +70,10 @@ pub fn base_command(cmd: &str) -> &str {
     cmd.split_whitespace().next().unwrap_or("")
 }
 
+pub(crate) fn bases_within_dl1(a: &str, b: &str) -> bool {
+    damerau_levenshtein(a, b) == 1
+}
+
 /// Split a command into its first two whitespace-delimited words and the rest.
 fn command_split(cmd: &str) -> (String, String) {
     let mut tokens = cmd.split_whitespace();
@@ -134,6 +138,27 @@ mod tests {
     #[test]
     fn unrelated_below_threshold() {
         assert!(ratio("ls -la", "kubectl get pods") < 0.5);
+    }
+
+    #[test]
+    fn bases_within_dl1_detects_transposition() {
+        assert!(bases_within_dl1("gti", "git"));
+    }
+
+    #[test]
+    fn bases_within_dl1_detects_substitution() {
+        assert!(bases_within_dl1("gut", "git"));
+    }
+
+    #[test]
+    fn bases_within_dl1_rejects_identical() {
+        assert!(!bases_within_dl1("git", "git"));
+    }
+
+    #[test]
+    fn bases_within_dl1_rejects_distance_two() {
+        assert!(!bases_within_dl1("cd", "mv"));
+        assert!(!bases_within_dl1("gxx", "git"));
     }
 
     #[test]
