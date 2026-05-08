@@ -3,6 +3,7 @@ pub mod exits;
 pub mod history;
 pub mod log;
 pub mod paths;
+pub mod secrets;
 pub mod settings;
 pub mod similarity;
 

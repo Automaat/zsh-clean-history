@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 
 use crate::history::ParsedHistory;
+use crate::secrets::mark_secrets;
 use crate::settings::CleaningSettings;
 use crate::similarity::{base_command, command_similar};
 
@@ -16,6 +17,7 @@ pub struct Removal {
 pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) -> Vec<Removal> {
     let mut removals: HashMap<usize, String> = HashMap::new();
     dedup_keep_newest(parsed, &mut removals);
+    mark_secrets(parsed, &mut removals);
     failed_similar_to_successful(parsed, settings, &mut removals);
     if settings.remove_rare {
         rare_variants(parsed, settings, &mut removals);
