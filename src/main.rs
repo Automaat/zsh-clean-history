@@ -59,12 +59,16 @@ fn main() -> Result<()> {
     }
 }
 
-fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
-    let settings = CleaningSettings {
+fn settings_from_cli(cli: &Cli) -> CleaningSettings {
+    CleaningSettings {
         similarity_threshold: cli.similarity,
         rare_threshold: cli.rare_threshold,
         remove_rare: cli.remove_rare,
-    };
+    }
+}
+
+fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
+    let settings = settings_from_cli(cli);
 
     let _lock = LockedHistory::acquire(&paths.lock_file())?;
 
@@ -132,11 +136,7 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
 }
 
 fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
-    let settings = CleaningSettings {
-        similarity_threshold: cli.similarity,
-        rare_threshold: cli.rare_threshold,
-        remove_rare: cli.remove_rare,
-    };
+    let settings = settings_from_cli(cli);
 
     let exit_codes = load_exit_codes(&paths.exits)?;
     let parsed = parse_history_file(&paths.history, &exit_codes)?;
@@ -149,8 +149,7 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
     let indices = parsed.cmd_to_lines.get(command).cloned().unwrap_or_default();
 
     if indices.is_empty() {
-        println!("command not found in history: {command}");
-        return Ok(());
+        anyhow::bail!("command not found in history: {command}");
     }
 
     println!("command:  {command}");
@@ -161,8 +160,8 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
         print!("  [{idx}] ");
         if let Some(removal) = removal_map.get(&idx) {
             print!("REMOVE  reason: {}", removal.reason);
-            if let Some(candidate) = extract_candidate(&removal.reason) {
-                let sim = zsh_clean_history::similarity::ratio(command, &candidate);
+            if let Some(ref candidate) = removal.candidate {
+                let sim = zsh_clean_history::similarity::ratio(command, candidate);
                 print!("  similarity: {sim:.2}");
             }
         } else {
@@ -172,13 +171,6 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn extract_candidate(reason: &str) -> Option<String> {
-    let start = reason.find('\'')?;
-    let rest = &reason[start + 1..];
-    let end = rest.rfind('\'')?;
-    Some(rest[..end].to_string())
 }
 
 fn write_history_atomically(
