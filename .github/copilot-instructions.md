@@ -23,7 +23,8 @@ Smart zsh history cleanup plugin — removes typos and failed commands via simil
 - `src/allowlist.rs`: User-whitelist regex filtering
 - `src/paths.rs`: File path construction
 - `src/settings.rs`: Configuration struct
-- `src/main.rs`: CLI entry point (clap, subcommands)
+- `src/cli_definition.rs`: Shared CLI definition — `Cli` struct and `Cmd` enum included by both `src/main.rs` and `build.rs` via `include!()`; defines all flags (`--similarity`, `--rare-threshold`, `--dry-run`, `--verbose`, `--quiet`, `--remove-rare`, `--no-log`, `--log-max-bytes`) and subcommands (`Undo`, `RecordExit`, `Explain`)
+- `src/main.rs`: CLI entry point — includes `cli_definition.rs`, wires up `clap`, dispatches subcommands
 - `tests/cli.rs`: End-to-end CLI tests
 - `benches/failed_similar_lookup.rs`: Criterion benchmarks
 
@@ -113,6 +114,10 @@ You review PRs immediately, before CI finishes. Do NOT flag issues that CI will 
 - [ ] Dry-run mode correct
 - [ ] Stats output helpful
 - [ ] Quiet mode suppresses appropriate output
+- [ ] `--verbose` / `--quiet` flags behave consistently across all subcommands
+- [ ] `--no-log` disables JSONL log writes; `--log-max-bytes` rotation threshold respected
+- [ ] `Explain` subcommand output is human-readable and covers all removal reasons
+- [ ] Shell completions and man page stay in sync with `src/cli_definition.rs` (regenerated via `build.rs`)
 
 ### 🟢 MEDIUM (Suggest/Comment)
 
