@@ -150,6 +150,6 @@ clean-history-log() {
 }
 
 if [[ "$ZSH_CLEAN_HISTORY_AUTO_CLEAN" == "true" ]]; then
-    _zsh_clean_history_exit() { clean-history --quiet; }
+    _zsh_clean_history_exit() { clean-history --quiet </dev/null >/dev/null 2>&1 &! }
     add-zsh-hook zshexit _zsh_clean_history_exit
 fi
