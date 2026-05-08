@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use regex::Regex;
 
@@ -51,12 +51,12 @@ fn patterns() -> &'static [(&'static str, Regex)] {
 }
 
 /// Marks entries containing secret patterns for removal, overriding any prior reason.
-pub(crate) fn mark_secrets(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
+pub(crate) fn mark_secrets(parsed: &ParsedHistory, removals: &mut HashMap<usize, Arc<str>>) {
     for (idx, entry) in parsed.entries.iter().enumerate() {
         let Some(cmd) = &entry.command else { continue };
         for (name, re) in patterns() {
             if re.is_match(cmd) {
-                removals.insert(idx, format!("Secret pattern: {name}"));
+                removals.insert(idx, Arc::from(format!("Secret pattern: {name}").as_str()));
                 break;
             }
         }

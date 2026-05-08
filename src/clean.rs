@@ -155,6 +155,8 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use std::sync::Arc;
+
     use crate::cleaner::Removal;
     use crate::history::HistoryEntry;
 
@@ -171,7 +173,7 @@ mod tests {
     fn make_removal(line: usize) -> Removal {
         Removal {
             line,
-            reason: "duplicate".to_string(),
+            reason: Arc::from("duplicate"),
             command: "test".to_string(),
         }
     }
