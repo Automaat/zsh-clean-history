@@ -19,7 +19,7 @@ jobs:
         GITHUB_TOKEN: ${{ github.token }}
     - name: Install Rust components
       run: rustup component add rustfmt clippy
-    - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+    - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
     - name: cargo fmt
       run: cargo fmt --all -- --check
     - name: cargo clippy
