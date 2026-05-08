@@ -230,8 +230,7 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, Arc<st
 
     for rare in rare_bases {
         if let Some((common, _)) = common_bases.iter().find(|(c, _)| bases_within_dl1(rare, c)) {
-            let reason: Arc<str> =
-                Arc::from(format!("Cross-base typo of '{common}'").as_str());
+            let reason: Arc<str> = Arc::from(format!("Cross-base typo of '{common}'").as_str());
             for (cmd, idxs) in &parsed.cmd_to_lines {
                 if base_command(cmd) == rare {
                     // Only remove if this specific command has no successful runs —
