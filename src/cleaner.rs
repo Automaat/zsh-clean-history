@@ -1022,4 +1022,306 @@ mod tests {
             "non-ASCII similarity missed; removals: {removals:?}"
         );
     }
+
+    // --- dedup edge cases ---
+
+    #[test]
+    fn dedup_empty_input() {
+        let h = parse_with_exits("", &[]);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(removals.is_empty());
+    }
+
+    #[test]
+    fn dedup_single_entry_no_removal() {
+        let h = parse_with_exits(": 1:0;ls -la\n", &[("1", 0)]);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(removals.is_empty());
+    }
+
+    #[test]
+    fn dedup_all_same_keeps_last() {
+        let h = parse_with_exits(
+            ": 1:0;ls\n: 2:0;ls\n: 3:0;ls\n: 4:0;ls\n: 5:0;ls\n",
+            &[("1", 0), ("2", 0), ("3", 0), ("4", 0), ("5", 0)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        let removed_lines: Vec<usize> = removals.iter().map(|r| r.line).collect();
+        assert_eq!(removed_lines, vec![0, 1, 2, 3]);
+        assert!(removals.iter().all(|r| &*r.reason == "Duplicate"));
+    }
+
+    // --- failed_similar edge cases ---
+
+    #[test]
+    fn failed_similar_no_successful_commands() {
+        // Both commands failed — no successful counterpart → nothing removed
+        let h = parse_with_exits(
+            ": 1:0;git statsu\n: 2:0;git status\n",
+            &[("1", 1), ("2", 1)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(
+            !removals.iter().any(|r| r.reason.contains("Failed similar")),
+            "no successful commands → no Failed-similar removal; removals: {removals:?}"
+        );
+    }
+
+    // Boundary pair: "git stxxus" vs "git status"
+    // DL("git stxxus", "git status") = 2 substitutions (a→x, t→x at positions 7-8)
+    // head ratio = 1 - 2/10 = 0.8 exactly
+    #[test]
+    fn failed_similar_threshold_0_79_flags() {
+        let h = parse_with_exits(
+            ": 1:0;git stxxus\n: 2:0;git status\n: 3:0;git status\n",
+            &[("1", 1), ("2", 0), ("3", 0)],
+        );
+        let s = CleaningSettings {
+            similarity_threshold: 0.79,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            removals
+                .iter()
+                .any(|r| r.command == "git stxxus" && r.reason.contains("Failed similar")),
+            "threshold 0.79 must flag sim=0.8 command; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn failed_similar_threshold_0_80_flags() {
+        let h = parse_with_exits(
+            ": 1:0;git stxxus\n: 2:0;git status\n: 3:0;git status\n",
+            &[("1", 1), ("2", 0), ("3", 0)],
+        );
+        let s = CleaningSettings {
+            similarity_threshold: 0.80,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            removals
+                .iter()
+                .any(|r| r.command == "git stxxus" && r.reason.contains("Failed similar")),
+            "threshold 0.80 must flag sim=0.8 command (inclusive >=); removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn failed_similar_threshold_0_81_preserves() {
+        let h = parse_with_exits(
+            ": 1:0;git stxxus\n: 2:0;git status\n: 3:0;git status\n",
+            &[("1", 1), ("2", 0), ("3", 0)],
+        );
+        let s = CleaningSettings {
+            similarity_threshold: 0.81,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            !removals
+                .iter()
+                .any(|r| r.command == "git stxxus" && r.reason.contains("Failed similar")),
+            "threshold 0.81 must not flag sim=0.8 command; removals: {removals:?}"
+        );
+    }
+
+    // --- bk_radius at threshold=0.8 with various string lengths ---
+
+    #[test]
+    fn bk_radius_5_chars() {
+        // ceil((1-0.8)/0.8 * 5) = ceil(1.25) = 2
+        assert_eq!(bk_radius(0.8, 5), 2);
+    }
+
+    #[test]
+    fn bk_radius_10_chars() {
+        // ceil((0.2/0.8) * 10) = ceil(2.5) = 3
+        assert_eq!(bk_radius(0.8, 10), 3);
+    }
+
+    #[test]
+    fn bk_radius_20_chars() {
+        // ceil((0.2/0.8) * 20) = ceil(5.0) = 5
+        assert_eq!(bk_radius(0.8, 20), 5);
+    }
+
+    // --- rare_variants time-decay boundary tests ---
+
+    #[test]
+    fn rare_variant_30d_exact_not_removed() {
+        // At exactly 30d: weight=0.5; 2 common at 8d (weight=0.5 each → 1.0 total)
+        // 1.0 > 0.5*3=1.5? No → not removed
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let eight_days_ago = now - 8 * 24 * 3600;
+        let thirty_days_ago = now - 30 * 24 * 3600;
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 0..2 {
+            text.push_str(&format!(": {}:0;git status\n", eight_days_ago + i));
+            exits.push(((eight_days_ago + i).to_string(), 0));
+        }
+        text.push_str(&format!(": {thirty_days_ago}:0;git statsu\n"));
+        exits.push((thirty_days_ago.to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let s = CleaningSettings {
+            remove_rare: true,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            !removals.iter().any(|r| r.reason.contains("Rare variant")),
+            "30d-old rare (weight=0.5, common=1.0 < 1.5) must not be removed; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn rare_variant_just_past_30d_removed() {
+        // Just past 30d: weight=0.1; 2 common at 8d (weight=1.0 total)
+        // 1.0 > 0.1*3=0.3? Yes → removed
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let eight_days_ago = now - 8 * 24 * 3600;
+        let past_30d = now - 30 * 24 * 3600 - 1;
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 0..2 {
+            text.push_str(&format!(": {}:0;git status\n", eight_days_ago + i));
+            exits.push(((eight_days_ago + i).to_string(), 0));
+        }
+        text.push_str(&format!(": {past_30d}:0;git statsu\n"));
+        exits.push((past_30d.to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let s = CleaningSettings {
+            remove_rare: true,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            removals.iter().any(|r| r.reason.contains("Rare variant")),
+            "30d+1s-old rare (weight=0.1, common=1.0 > 0.3) must be removed; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn rare_variant_7d_exact_full_weight() {
+        // Exactly 7d old: weight=1.0; 7 common at 8d (weight=0.5 each → 3.5 total)
+        // 3.5 > 1.0*3=3.0 → removed
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let eight_days_ago = now - 8 * 24 * 3600;
+        let seven_days_ago = now - 7 * 24 * 3600;
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 0..7 {
+            text.push_str(&format!(": {}:0;git status\n", eight_days_ago + i));
+            exits.push(((eight_days_ago + i).to_string(), 0));
+        }
+        text.push_str(&format!(": {seven_days_ago}:0;git statsu\n"));
+        exits.push((seven_days_ago.to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let s = CleaningSettings {
+            remove_rare: true,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            removals.iter().any(|r| r.reason.contains("Rare variant")),
+            "7d-old rare (weight=1.0, common=3.5 > 3.0) must be removed; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn rare_variant_not_removed_when_disabled() {
+        // Default settings have remove_rare=false; dominant common must not trigger removal
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let old_ts = now - 40 * 24 * 3600;
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 0..40 {
+            text.push_str(&format!(": {}:0;git status\n", old_ts + i));
+            exits.push(((old_ts + i).to_string(), 0));
+        }
+        text.push_str(&format!(": {}:0;git statsu\n", old_ts + 40));
+        exits.push(((old_ts + 40).to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
+        assert!(
+            !removals.iter().any(|r| r.reason.contains("Rare variant")),
+            "remove_rare=false must suppress rare-variant removal; removals: {removals:?}"
+        );
+    }
+
+    #[test]
+    fn rare_variant_rare_threshold_boundary() {
+        // rare_weight=3.0, rare_threshold=3.0: 3.0 > 3.0 is false → considered rare → removed
+        // rare_weight=4.0, rare_threshold=3.0: 4.0 > 3.0 → skipped → not removed
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let recent_ts = now - 1;
+        let common_ts = now - 2;
+
+        let s = CleaningSettings {
+            remove_rare: true,
+            rare_threshold: 3.0,
+            ..Default::default()
+        };
+
+        // 3 recent "git statsu" (weight=1.0 each → 3.0), 10 recent "git status" (weight=10.0)
+        // 3.0 > 3.0? No → considered rare; 10.0 > 3.0*3=9.0? Yes → REMOVED
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 0..10 {
+            text.push_str(&format!(": {}:0;git status\n", common_ts - i));
+            exits.push(((common_ts - i).to_string(), 0));
+        }
+        for i in 0..3 {
+            text.push_str(&format!(": {}:0;git statsu\n", recent_ts - i));
+            exits.push(((recent_ts - i).to_string(), 0));
+        }
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            removals.iter().any(|r| r.reason.contains("Rare variant")),
+            "rare_weight=3.0 at threshold=3.0 must be removed; removals: {removals:?}"
+        );
+
+        // 4 recent "git statsu" (weight=1.0 each → 4.0), same common
+        // 4.0 > 3.0? Yes → skipped → NOT removed
+        let mut text2 = String::new();
+        let mut exits2: Vec<(String, i32)> = Vec::new();
+        for i in 0..10 {
+            text2.push_str(&format!(": {}:0;git status\n", common_ts - i));
+            exits2.push(((common_ts - i).to_string(), 0));
+        }
+        for i in 0..4 {
+            text2.push_str(&format!(": {}:0;git statsu\n", recent_ts - i));
+            exits2.push(((recent_ts - i).to_string(), 0));
+        }
+        let exits_ref2: Vec<(&str, i32)> = exits2.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h2 = parse_with_exits(&text2, &exits_ref2);
+        let removals2 = identify_removals(&h2, &s, None);
+        assert!(
+            !removals2.iter().any(|r| r.reason.contains("Rare variant")),
+            "rare_weight=4.0 at threshold=3.0 must not be removed; removals: {removals2:?}"
+        );
+    }
 }
