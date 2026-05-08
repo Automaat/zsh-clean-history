@@ -74,18 +74,76 @@ pub(crate) fn bases_within_dl1(a: &str, b: &str) -> bool {
     damerau_levenshtein(a, b) == 1
 }
 
-/// Split a command into its first two whitespace-delimited words and the rest.
+/// Split a command into its first two quote-aware tokens (head) and the rest.
+///
+/// Handles single and double quoted arguments so that `git commit -m "hello world"`
+/// tokenizes as ["git", "commit", "-m", "hello world"] rather than splitting on
+/// the internal space. Inside double quotes, `\"` and `\\` are treated as escape
+/// sequences. Outside quotes, `\X` yields literal `X`. Empty quoted args (`""`)
+/// are preserved as empty tokens so they remain distinct from a missing argument.
 fn command_split(cmd: &str) -> (String, String) {
-    let mut tokens = cmd.split_whitespace();
-    let w0 = tokens.next().unwrap_or("");
-    let w1 = tokens.next().unwrap_or("");
-    let rest: Vec<&str> = tokens.collect();
-    let head = if w1.is_empty() {
-        w0.to_string()
-    } else {
-        format!("{w0} {w1}")
-    };
-    (head, rest.join(" "))
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut token_started = false;
+    let mut chars = cmd.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if in_single_quote {
+            if ch == '\'' {
+                in_single_quote = false;
+            } else {
+                current.push(ch);
+            }
+        } else if in_double_quote {
+            if ch == '"' {
+                in_double_quote = false;
+            } else if ch == '\\' {
+                match chars.peek() {
+                    Some('"') | Some('\\') => current.push(chars.next().unwrap()),
+                    _ => current.push('\\'),
+                }
+            } else {
+                current.push(ch);
+            }
+        } else {
+            match ch {
+                '\'' => {
+                    in_single_quote = true;
+                    token_started = true;
+                }
+                '"' => {
+                    in_double_quote = true;
+                    token_started = true;
+                }
+                '\\' => {
+                    if let Some(next) = chars.next() {
+                        current.push(next);
+                        token_started = true;
+                    }
+                }
+                ' ' | '\t' => {
+                    if token_started || !current.is_empty() {
+                        tokens.push(current.clone());
+                        current.clear();
+                        token_started = false;
+                    }
+                }
+                c => {
+                    current.push(c);
+                    token_started = true;
+                }
+            }
+        }
+    }
+    if token_started || !current.is_empty() {
+        tokens.push(current);
+    }
+
+    let head = tokens.iter().take(2).cloned().collect::<Vec<_>>().join(" ");
+    let rest = tokens.iter().skip(2).cloned().collect::<Vec<_>>().join(" ");
+    (head, rest)
 }
 
 /// Returns true if `failed` looks like a typo of `success`.
@@ -339,6 +397,66 @@ mod tests {
         assert!(!command_similar(
             "git checkout v1.2.3-rc1",
             "git checkout v1.2.3-rc2",
+            0.8
+        ));
+    }
+
+    // --- command_split quote handling ---
+
+    #[test]
+    fn command_split_double_quoted_arg_is_single_token() {
+        let (head, rest) = command_split(r#"git commit -m "hello world""#);
+        assert_eq!(head, "git commit");
+        assert_eq!(rest, "-m hello world");
+    }
+
+    #[test]
+    fn command_split_single_quoted_arg_is_single_token() {
+        let (head, rest) = command_split("echo 'single quoted args'");
+        assert_eq!(head, "echo single quoted args");
+        assert_eq!(rest, "");
+    }
+
+    #[test]
+    fn command_split_backslash_escapes_quote_outside_quotes() {
+        // Outside quotes, \" is a literal " in the token (not a quote delimiter)
+        let (head, rest) = command_split(r#"echo \"escaped\""#);
+        assert_eq!(head, r#"echo "escaped""#);
+        assert_eq!(rest, "");
+    }
+
+    #[test]
+    fn command_split_escaped_quote_inside_double_quotes() {
+        // \" inside double quotes yields a literal " without closing the string
+        let (head, rest) = command_split(r#"git commit -m "hello \"world\"""#);
+        assert_eq!(head, "git commit");
+        assert_eq!(rest, r#"-m hello "world""#);
+    }
+
+    #[test]
+    fn command_split_empty_quoted_arg_preserved() {
+        // "" must produce an empty token so -m "" differs from bare -m
+        let (head, rest) = command_split(r#"git commit -m """#);
+        assert_eq!(head, "git commit");
+        assert_eq!(rest, "-m ");
+    }
+
+    #[test]
+    fn command_similar_quoted_commit_message_typo_caught() {
+        // typo in subcommand with quoted multi-word -m argument
+        assert!(command_similar(
+            r#"git cmmit -m "hello world""#,
+            r#"git commit -m "hello world""#,
+            0.8
+        ));
+    }
+
+    #[test]
+    fn command_similar_different_quoted_messages_not_flagged() {
+        // same subcommand, different quoted message content → not a typo
+        assert!(!command_similar(
+            r#"git commit -m "fix bug""#,
+            r#"git commit -m "add feature""#,
             0.8
         ));
     }
