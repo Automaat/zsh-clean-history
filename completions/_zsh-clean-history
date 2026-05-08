@@ -1,0 +1,157 @@
+#compdef zsh-clean-history
+
+autoload -U is-at-least
+
+_zsh-clean-history() {
+    typeset -A opt_args
+    typeset -a _arguments_options
+    local ret=1
+
+    if is-at-least 5.2; then
+        _arguments_options=(-s -S -C)
+    else
+        _arguments_options=(-s -C)
+    fi
+
+    local context curcontext="$curcontext" state line
+    _arguments "${_arguments_options[@]}" : \
+'--similarity=[]:SIMILARITY:_default' \
+'--rare-threshold=[]:RARE_THRESHOLD:_default' \
+'--log-max-bytes=[]:LOG_MAX_BYTES:_default' \
+'--dry-run[]' \
+'-q[]' \
+'--quiet[]' \
+'--remove-rare[]' \
+'--no-log[]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+":: :_zsh-clean-history_commands" \
+"*::: :->zsh-clean-history" \
+&& ret=0
+    case $state in
+    (zsh-clean-history)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:zsh-clean-history-command-$line[1]:"
+        case $line[1] in
+            (undo)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(record-exit)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':timestamp:_default' \
+':exit_code:_default' \
+&& ret=0
+;;
+(explain)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':command:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_zsh-clean-history__subcmd__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:zsh-clean-history-help-command-$line[1]:"
+        case $line[1] in
+            (undo)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(record-exit)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(explain)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+}
+
+(( $+functions[_zsh-clean-history_commands] )) ||
+_zsh-clean-history_commands() {
+    local commands; commands=(
+'undo:' \
+'record-exit:' \
+'explain:' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'zsh-clean-history commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__explain_commands] )) ||
+_zsh-clean-history__subcmd__explain_commands() {
+    local commands; commands=()
+    _describe -t commands 'zsh-clean-history explain commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__help_commands] )) ||
+_zsh-clean-history__subcmd__help_commands() {
+    local commands; commands=(
+'undo:' \
+'record-exit:' \
+'explain:' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'zsh-clean-history help commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__help__subcmd__explain_commands] )) ||
+_zsh-clean-history__subcmd__help__subcmd__explain_commands() {
+    local commands; commands=()
+    _describe -t commands 'zsh-clean-history help explain commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__help__subcmd__help_commands] )) ||
+_zsh-clean-history__subcmd__help__subcmd__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'zsh-clean-history help help commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__help__subcmd__record-exit_commands] )) ||
+_zsh-clean-history__subcmd__help__subcmd__record-exit_commands() {
+    local commands; commands=()
+    _describe -t commands 'zsh-clean-history help record-exit commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__help__subcmd__undo_commands] )) ||
+_zsh-clean-history__subcmd__help__subcmd__undo_commands() {
+    local commands; commands=()
+    _describe -t commands 'zsh-clean-history help undo commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__record-exit_commands] )) ||
+_zsh-clean-history__subcmd__record-exit_commands() {
+    local commands; commands=()
+    _describe -t commands 'zsh-clean-history record-exit commands' commands "$@"
+}
+(( $+functions[_zsh-clean-history__subcmd__undo_commands] )) ||
+_zsh-clean-history__subcmd__undo_commands() {
+    local commands; commands=()
+    _describe -t commands 'zsh-clean-history undo commands' commands "$@"
+}
+
+if [ "$funcstack[1]" = "_zsh-clean-history" ]; then
+    _zsh-clean-history "$@"
+else
+    compdef _zsh-clean-history zsh-clean-history
+fi

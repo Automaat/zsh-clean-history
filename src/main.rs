@@ -10,41 +10,17 @@ use fs2::FileExt;
 use tempfile::NamedTempFile;
 use zsh_clean_history::cleaner::Removal;
 use zsh_clean_history::{
-    CleaningSettings, DEFAULT_LOG_MAX_BYTES, Paths, compact_exits_file, identify_removals,
-    load_exit_codes, parse_history_file, write_log_entry,
+    CleaningSettings, Paths, compact_exits_file, identify_removals, load_exit_codes,
+    parse_history_file, write_log_entry,
 };
 
-#[derive(Parser)]
-#[command(
-    name = "zsh-clean-history",
-    version,
-    about = "Smart zsh history cleaner - removes typos and failed commands"
-)]
-struct Cli {
-    #[arg(long, default_value_t = 0.8)]
-    similarity: f64,
-    #[arg(long, default_value_t = 3)]
-    rare_threshold: usize,
-    #[arg(long)]
-    dry_run: bool,
-    #[arg(long, short)]
-    quiet: bool,
-    #[arg(long)]
-    remove_rare: bool,
-    #[arg(long)]
-    no_log: bool,
-    #[arg(long, default_value_t = DEFAULT_LOG_MAX_BYTES)]
-    log_max_bytes: u64,
-    #[command(subcommand)]
-    cmd: Option<Cmd>,
-}
+include!("cli_definition.rs");
 
-#[derive(Subcommand)]
-enum Cmd {
-    Undo,
-    RecordExit { timestamp: String, exit_code: i32 },
-    Explain { command: String },
-}
+// Compile-time guard: keeps cli_definition.rs in sync with log.rs
+const _: () = assert!(
+    zsh_clean_history::DEFAULT_LOG_MAX_BYTES == DEFAULT_LOG_MAX_BYTES,
+    "Update DEFAULT_LOG_MAX_BYTES in cli_definition.rs to match log.rs"
+);
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
