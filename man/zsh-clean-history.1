@@ -1,0 +1,49 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH zsh-clean-history 1  "zsh-clean-history 0.1.0" 
+.SH NAME
+zsh\-clean\-history \- Smart zsh history cleaner \- removes typos and failed commands
+.SH SYNOPSIS
+\fBzsh\-clean\-history\fR [\fB\-\-similarity\fR] [\fB\-\-rare\-threshold\fR] [\fB\-\-dry\-run\fR] [\fB\-q\fR|\fB\-\-quiet\fR] [\fB\-\-remove\-rare\fR] [\fB\-\-no\-log\fR] [\fB\-\-log\-max\-bytes\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+Smart zsh history cleaner \- removes typos and failed commands
+.SH OPTIONS
+.TP
+\fB\-\-similarity\fR \fI<SIMILARITY>\fR [default: 0.8]
+
+.TP
+\fB\-\-rare\-threshold\fR \fI<RARE_THRESHOLD>\fR [default: 3]
+
+.TP
+\fB\-\-dry\-run\fR
+
+.TP
+\fB\-q\fR, \fB\-\-quiet\fR
+
+.TP
+\fB\-\-remove\-rare\fR
+
+.TP
+\fB\-\-no\-log\fR
+
+.TP
+\fB\-\-log\-max\-bytes\fR \fI<LOG_MAX_BYTES>\fR [default: 1048576]
+
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+zsh\-clean\-history\-undo(1)
+.TP
+zsh\-clean\-history\-record\-exit(1)
+.TP
+zsh\-clean\-history\-explain(1)
+.TP
+zsh\-clean\-history\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.1.0

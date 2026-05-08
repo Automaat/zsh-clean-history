@@ -15,14 +15,14 @@ _zsh-clean-history() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" : \
-'--similarity=[Similarity threshold (0.0–1.0) for deduplication]: :_default' \
-'--rare-threshold=[Commands run fewer than this many times are considered rare]: :_default' \
-'--log-max-bytes=[Max log file size in bytes before rotation (default\: 1 MiB)]: :_default' \
-'--dry-run[Print what would be removed without writing changes]' \
-'-q[Suppress output]' \
-'--quiet[Suppress output]' \
-'--remove-rare[Remove commands used fewer than --rare-threshold times]' \
-'--no-log[Disable cleanup run logging]' \
+'--similarity=[]:SIMILARITY:_default' \
+'--rare-threshold=[]:RARE_THRESHOLD:_default' \
+'--log-max-bytes=[]:LOG_MAX_BYTES:_default' \
+'--dry-run[]' \
+'-q[]' \
+'--quiet[]' \
+'--remove-rare[]' \
+'--no-log[]' \
 '-h[Print help]' \
 '--help[Print help]' \
 '-V[Print version]' \
@@ -47,7 +47,7 @@ _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
 '--help[Print help]' \
 ':timestamp:_default' \
-':exit-code:_default' \
+':exit_code:_default' \
 && ret=0
 ;;
 (explain)
@@ -97,9 +97,9 @@ esac
 (( $+functions[_zsh-clean-history_commands] )) ||
 _zsh-clean-history_commands() {
     local commands; commands=(
-'undo:Restore history from the latest backup' \
-'record-exit:Record exit code of a command (called by the zsh plugin)' \
-'explain:Explain why a command would be removed' \
+'undo:' \
+'record-exit:' \
+'explain:' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'zsh-clean-history commands' commands "$@"
@@ -112,9 +112,9 @@ _zsh-clean-history__subcmd__explain_commands() {
 (( $+functions[_zsh-clean-history__subcmd__help_commands] )) ||
 _zsh-clean-history__subcmd__help_commands() {
     local commands; commands=(
-'undo:Restore history from the latest backup' \
-'record-exit:Record exit code of a command (called by the zsh plugin)' \
-'explain:Explain why a command would be removed' \
+'undo:' \
+'record-exit:' \
+'explain:' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'zsh-clean-history help commands' commands "$@"
