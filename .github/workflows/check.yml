@@ -26,6 +26,8 @@ jobs:
       run: cargo clippy --all-targets -- -D warnings
     - name: cargo test
       run: cargo test --all-targets
+    - name: cargo bench compile
+      run: cargo bench --no-run
     - name: zsh syntax check
       if: runner.os == 'Linux'
       run: |
