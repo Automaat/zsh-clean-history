@@ -36,7 +36,7 @@ impl<'a> LogRemoval<'a> {
     fn from_removal(r: &'a Removal) -> Self {
         Self {
             line: r.line,
-            reason: &r.reason,
+            reason: &*r.reason,
             command: if r.reason.starts_with("Secret pattern:") {
                 "<redacted>"
             } else {
