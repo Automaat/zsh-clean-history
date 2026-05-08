@@ -1,3 +1,4 @@
+pub mod clean;
 pub mod cleaner;
 pub mod exits;
 pub mod history;
@@ -7,6 +8,7 @@ pub(crate) mod secrets;
 pub mod settings;
 pub mod similarity;
 
+pub use clean::{CleanReport, LockedHistory, run_cleanup};
 pub use cleaner::{Removal, identify_removals};
 pub use exits::{compact_exits_file, load_exit_codes};
 pub use history::{HistoryEntry, ParsedHistory, parse_history_file, parse_history_text};
