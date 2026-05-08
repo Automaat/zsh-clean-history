@@ -150,6 +150,18 @@ clean-history-log() {
 }
 
 if [[ "$ZSH_CLEAN_HISTORY_AUTO_CLEAN" == "true" ]]; then
-    _zsh_clean_history_exit() { clean-history --quiet </dev/null >/dev/null 2>&1 &! }
+    _zsh_clean_history_exit() {
+        {
+            local out rc
+            out=$(clean-history --quiet 2>&1)
+            rc=$?
+            if (( rc != 0 )); then
+                local ts
+                strftime -s ts '%Y-%m-%dT%H:%M:%SZ' $EPOCHSECONDS
+                printf '[%s] ERROR exit=%d %s\n' "$ts" "$rc" "$out" \
+                    >> "${HOME}/.zsh_history_cleanup.log"
+            fi
+        } </dev/null &!
+    }
     add-zsh-hook zshexit _zsh_clean_history_exit
 fi
