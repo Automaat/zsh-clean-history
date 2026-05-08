@@ -153,7 +153,7 @@ fn cross_base_typo_removed_in_cleanup() {
     fs::write(home.join(".zsh_history"), &history).unwrap();
     fs::write(home.join(".zsh_history_exits"), &exits).unwrap();
 
-    run(home, &["--dry-run"])
+    run(home, &["--dry-run", "--verbose"])
         .success()
         .stdout(predicates::str::contains("gti status"))
         .stdout(predicates::str::contains("Cross-base typo of 'git'"));
