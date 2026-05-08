@@ -979,6 +979,7 @@ dependencies = [
  "clap",
  "fs2",
  "predicates",
+ "regex",
  "serde",
  "serde_json",
  "strsim",

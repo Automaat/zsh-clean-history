@@ -22,7 +22,28 @@ struct LogEntry<'a> {
     total_lines: usize,
     removed_count: usize,
     reason_counts: BTreeMap<String, usize>,
-    removals: &'a [Removal],
+    removals: Vec<LogRemoval<'a>>,
+}
+
+#[derive(Serialize)]
+struct LogRemoval<'a> {
+    line: usize,
+    reason: &'a str,
+    command: &'a str,
+}
+
+impl<'a> LogRemoval<'a> {
+    fn from_removal(r: &'a Removal) -> Self {
+        Self {
+            line: r.line,
+            reason: &r.reason,
+            command: if r.reason.starts_with("Secret pattern:") {
+                "<redacted>"
+            } else {
+                &r.command
+            },
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -56,7 +77,7 @@ pub fn write_log_entry(
         total_lines,
         removed_count: removals.len(),
         reason_counts,
-        removals,
+        removals: removals.iter().map(LogRemoval::from_removal).collect(),
     };
 
     let json = serde_json::to_string(&entry)?;
@@ -132,6 +153,24 @@ mod tests {
         assert_eq!(v["settings"]["similarity"], 0.85);
         assert_eq!(v["reason_counts"]["Failed similar to 'git status'"], 1);
         assert_eq!(v["removals"][0]["command"], "git statsu");
+    }
+
+    #[test]
+    fn secret_command_is_redacted_in_log() {
+        let dir = tempdir().unwrap();
+        let log = dir.path().join("cleanup.log");
+        let settings = CleaningSettings::default();
+        let removals = vec![Removal {
+            line: 1,
+            reason: "Secret pattern: AWS secret key".into(),
+            command: "export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG".into(),
+        }];
+        write_log_entry(&log, &settings, false, 10, &removals, u64::MAX).unwrap();
+
+        let body = fs::read_to_string(&log).unwrap();
+        let v: Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+        assert_eq!(v["removals"][0]["command"], "<redacted>");
+        assert!(!body.contains("wJalrXUtnFEMI"));
     }
 
     #[test]
