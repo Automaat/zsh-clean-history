@@ -2,6 +2,8 @@ use strsim::damerau_levenshtein;
 
 const FALLBACK_THRESHOLD: f64 = 0.95;
 
+// Intentionally crate-private: the public API exposes `command_similar`;
+// raw ratio values are an implementation detail not guaranteed to be stable.
 pub(crate) fn ratio(a: &str, b: &str) -> f64 {
     if a == b {
         return 1.0;
@@ -35,8 +37,9 @@ fn command_split(cmd: &str) -> (String, String) {
 /// Returns true if `failed` looks like a typo of `success`.
 ///
 /// Runs Damerau-Levenshtein on the first two words only; the rest must match
-/// exactly. Falls back to full-string similarity >= `FALLBACK_THRESHOLD` when
-/// the head has a typo but the rest differs.
+/// exactly. Falls back to full-string similarity >= `FALLBACK_THRESHOLD` (0.95,
+/// fixed) when the head has a typo but the rest differs. The fallback ignores
+/// the caller-supplied `threshold` and always applies the stricter 0.95 floor.
 ///
 /// Known limitation: commands differing only in flags/args beyond the first two
 /// words (e.g. `git status -v` vs `git status -s`) are never flagged — rest
@@ -121,17 +124,26 @@ mod tests {
     }
 
     #[test]
-    fn fallback_path_high_overall_similarity() {
-        // head typo + rest differs but overall string is very similar (>= 0.95)
-        // "git statsu x" vs "git status x" — rest differs because head consumed
-        // different token counts? No: both split as head="git statsu"/"git status",
-        // rest="x"/"x" → rest equal, exercises the direct-return path.
-        // For fallback: need head typo + genuinely different rest + high full-sim.
-        // Craft: "git cmmit --amned" vs "git commit --amend" — head typo, rest typo too.
-        let sim = ratio("git cmmit --amned", "git commit --amend");
-        // If overall sim >= 0.95 → flagged via fallback; if not → not flagged.
-        // Just assert the function is consistent with the ratio.
-        let result = command_similar("git cmmit --amned", "git commit --amend", 0.8);
-        assert_eq!(result, sim >= FALLBACK_THRESHOLD);
+    fn fallback_path_fires_when_overall_similarity_high() {
+        // head typo ("cmmit" vs "commit") + rest typo ("--amned..." vs "--amend...")
+        // 2 edits over 43 chars → overall ratio ≈ 0.953 >= FALLBACK_THRESHOLD (0.95)
+        // → flagged via fallback even though rest differs
+        assert!(command_similar(
+            "git cmmit --amned-this-is-a-long-flag-value",
+            "git commit --amend-this-is-a-long-flag-value",
+            0.8
+        ));
+    }
+
+    #[test]
+    fn fallback_path_rejects_when_overall_similarity_low() {
+        // head typo + rest typo but strings too short:
+        // "git cmmit --amned" (17 chars) vs "git commit --amend" (18 chars)
+        // 2 edits / 18 = ratio ≈ 0.889 < FALLBACK_THRESHOLD → not flagged
+        assert!(!command_similar(
+            "git cmmit --amned",
+            "git commit --amend",
+            0.8
+        ));
     }
 }
