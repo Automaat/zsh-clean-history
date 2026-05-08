@@ -1,7 +1,7 @@
 [package]
 name = "zsh-clean-history"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 rust-version = "1.85"
 description = "Smart zsh history cleanup: removes typos and failed commands via similarity analysis"
 license = "MIT"
