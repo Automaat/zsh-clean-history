@@ -84,7 +84,7 @@ mod tests {
             ": 1:0;export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("AWS secret key"));
     }
@@ -95,7 +95,7 @@ mod tests {
             ": 1:0;export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("AWS access key"));
     }
@@ -106,7 +106,7 @@ mod tests {
             ": 1:0;curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("Bearer token"));
     }
@@ -117,7 +117,7 @@ mod tests {
             ": 1:0;curl -d 'username=admin&password=supersecret'\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("password"));
     }
@@ -128,7 +128,7 @@ mod tests {
             ": 1:0;curl 'https://api.example.com?api_key=mysecretvalue'\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("API key"));
     }
@@ -139,7 +139,7 @@ mod tests {
             ": 1:0;WEBHOOK_SECRET=aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899 ./deploy.sh\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("hex blob"));
     }
@@ -150,14 +150,14 @@ mod tests {
             ": 1:0;git reset --hard aabbccddeeff00112233445566778899aabbccdd\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert!(removals.is_empty());
     }
 
     #[test]
     fn short_token_not_removed() {
         let h = parse(": 1:0;git config credential.token=x\n", &[("1", 0)]);
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert!(removals.is_empty());
     }
 
@@ -167,7 +167,7 @@ mod tests {
             ": 1:0;psql postgres://admin:s3cr3tpass@db.example.com/mydb\n",
             &[("1", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 1);
         assert!(removals[0].reason.contains("connection string"));
     }
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn clean_command_not_removed() {
         let h = parse(": 1:0;git status\n", &[("1", 0)]);
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert!(removals.is_empty());
     }
 
@@ -185,7 +185,7 @@ mod tests {
             ": 1:0;export TOKEN=secret123abc\n: 2:0;export TOKEN=secret123abc\n",
             &[("1", 0), ("2", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert_eq!(removals.len(), 2);
         assert!(
             removals

@@ -8,6 +8,7 @@ use chrono::Local;
 use fs2::FileExt;
 use tempfile::NamedTempFile;
 
+use crate::allowlist::load_allowlist;
 use crate::cleaner::Removal;
 use crate::{
     CleaningSettings, HistoryEntry, Paths, compact_exits_file, identify_removals, load_exit_codes,
@@ -53,7 +54,8 @@ pub fn run_cleanup(
 
     let exit_codes = load_exit_codes(&paths.exits)?;
     let parsed = parse_history_file(&paths.history, &exit_codes)?;
-    let removals = identify_removals(&parsed, settings);
+    let allowlist = load_allowlist(&paths.allowlist)?;
+    let removals = identify_removals(&parsed, settings, allowlist.as_ref());
     let total_lines = parsed.entries.len();
     let drop_set = removals_set(&removals);
 
