@@ -58,7 +58,7 @@ fn bench_large_bucket_few_matches(c: &mut Criterion) {
     c.bench_function("bench_large_bucket_few_matches", |b| {
         b.iter(|| {
             let parsed = parse_history_text(&text, &exits);
-            identify_removals(&parsed, &settings)
+            identify_removals(&parsed, &settings, None)
         });
     });
 }
@@ -85,7 +85,7 @@ fn bench_large_bucket_many_matches(c: &mut Criterion) {
     c.bench_function("bench_large_bucket_many_matches", |b| {
         b.iter(|| {
             let parsed = parse_history_text(&text, &exits);
-            identify_removals(&parsed, &settings)
+            identify_removals(&parsed, &settings, None)
         });
     });
 }
@@ -181,7 +181,7 @@ fn bench_100k(c: &mut Criterion) {
     c.bench_function("bench_100k", |b| {
         b.iter(|| {
             let parsed = parse_history_text(&text, &exits);
-            identify_removals(&parsed, &settings)
+            identify_removals(&parsed, &settings, None)
         });
     });
 }

@@ -490,7 +490,7 @@ mod tests {
         exits.push(("21".to_string(), 0));
         let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
         let h = parse_with_exits(&text, &exits_ref);
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         let flagged = removals
             .iter()
             .any(|r| r.command == "fd foo" && r.reason.contains("Cross-base typo"));
