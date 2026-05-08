@@ -51,10 +51,7 @@ fn patterns() -> &'static [(&'static str, Regex)] {
 }
 
 /// Marks entries containing secret patterns for removal, overriding any prior reason.
-pub(crate) fn mark_secrets(
-    parsed: &ParsedHistory,
-    removals: &mut HashMap<usize, String>,
-) {
+pub(crate) fn mark_secrets(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
     for (idx, entry) in parsed.entries.iter().enumerate() {
         let Some(cmd) = &entry.command else { continue };
         for (name, re) in patterns() {
@@ -74,7 +71,10 @@ mod tests {
     use crate::settings::CleaningSettings;
 
     fn parse(text: &str, exits: &[(&str, i32)]) -> ParsedHistory {
-        let map = exits.iter().map(|(ts, c)| ((*ts).to_string(), *c)).collect();
+        let map = exits
+            .iter()
+            .map(|(ts, c)| ((*ts).to_string(), *c))
+            .collect();
         parse_history_text(text, &map)
     }
 
@@ -187,8 +187,10 @@ mod tests {
         );
         let removals = identify_removals(&h, &CleaningSettings::default());
         assert_eq!(removals.len(), 2);
-        assert!(removals
-            .iter()
-            .all(|r| r.reason.starts_with("Secret pattern:")));
+        assert!(
+            removals
+                .iter()
+                .all(|r| r.reason.starts_with("Secret pattern:"))
+        );
     }
 }
