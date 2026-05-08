@@ -54,7 +54,8 @@ The plugin auto-finds the binary on `PATH`, or falls back to `target/release/zsh
 ## Configuration
 
 ```bash
-# Auto-clean on shell exit (default: false)
+# Auto-clean on shell exit (default: false); runs in background, non-blocking
+# Failures are logged to ~/.zsh_history_cleanup.log
 ZSH_CLEAN_HISTORY_AUTO_CLEAN=true
 
 # Similarity threshold 0..1 (default: 0.8)
