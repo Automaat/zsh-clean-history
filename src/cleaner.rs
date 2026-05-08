@@ -120,7 +120,7 @@ fn failed_similar_to_successful(
     settings: &CleaningSettings,
     removals: &mut HashMap<usize, String>,
 ) {
-    let by_base = group_by_base_strings(parsed.successful_counts.keys());
+    let by_base = group_by_base(parsed.successful_counts.keys());
     let indices = build_bucket_indices(&by_base);
 
     for (failed_cmd, &fail_count) in &parsed.failed_counts {
@@ -274,7 +274,7 @@ fn rare_variants(
         }
     }
 
-    let by_base = group_by_base_strs(weighted_counts.keys().copied());
+    let by_base = group_by_base(weighted_counts.keys().copied());
     for (&rare_cmd, &rare_weight) in &weighted_counts {
         if rare_weight > settings.rare_threshold {
             continue;
@@ -304,24 +304,17 @@ fn rare_variants(
     }
 }
 
-fn group_by_base_strings<'a, I>(iter: I) -> HashMap<&'a str, Vec<&'a str>>
+fn group_by_base<'a, S, I>(iter: I) -> HashMap<&'a str, Vec<&'a str>>
 where
-    I: IntoIterator<Item = &'a String>,
+    S: AsRef<str> + ?Sized + 'a,
+    I: IntoIterator<Item = &'a S>,
 {
     let mut by_base: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
     for s in iter {
-        by_base.entry(base_command(s)).or_default().push(s.as_str());
-    }
-    by_base
-}
-
-fn group_by_base_strs<'a, I>(iter: I) -> HashMap<&'a str, Vec<&'a str>>
-where
-    I: IntoIterator<Item = &'a str>,
-{
-    let mut by_base: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
-    for s in iter {
-        by_base.entry(base_command(s)).or_default().push(s);
+        by_base
+            .entry(base_command(s.as_ref()))
+            .or_default()
+            .push(s.as_ref());
     }
     by_base
 }
