@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::SecondsFormat;
@@ -36,6 +37,7 @@ pub fn write_log_entry(
     dry_run: bool,
     total_lines: usize,
     removals: &[Removal],
+    max_bytes: u64,
 ) -> Result<()> {
     let mut reason_counts: BTreeMap<String, usize> = BTreeMap::new();
     for r in removals {
@@ -57,13 +59,26 @@ pub fn write_log_entry(
     };
 
     let json = serde_json::to_string(&entry)?;
-    let first_create = !log_path.exists();
+
     if let Some(parent) = log_path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             anyhow::bail!("log directory does not exist: {}", parent.display());
         }
     }
 
+    if log_path
+        .metadata()
+        .map(|m| m.len() >= max_bytes)
+        .unwrap_or(false)
+    {
+        let mut rotated_name = OsString::from(log_path);
+        rotated_name.push(".1");
+        let rotated = PathBuf::from(rotated_name);
+        let _ = fs::remove_file(&rotated);
+        fs::rename(log_path, &rotated)?;
+    }
+
+    let first_create = !log_path.exists();
     let mut f = OpenOptions::new()
         .create(true)
         .append(true)
@@ -101,7 +116,7 @@ mod tests {
             reason: "Failed similar to 'git status'".into(),
             command: "git statsu".into(),
         }];
-        write_log_entry(&log, &settings, true, 42, &removals).unwrap();
+        write_log_entry(&log, &settings, true, 42, &removals, 1024 * 1024).unwrap();
 
         let body = fs::read_to_string(&log).unwrap();
         let lines: Vec<&str> = body.lines().filter(|l| !l.is_empty()).collect();
@@ -120,8 +135,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let log = dir.path().join("cleanup.log");
         let settings = CleaningSettings::default();
-        write_log_entry(&log, &settings, true, 10, &[]).unwrap();
-        write_log_entry(&log, &settings, true, 11, &[]).unwrap();
+        write_log_entry(&log, &settings, true, 10, &[], 1024 * 1024).unwrap();
+        write_log_entry(&log, &settings, true, 11, &[], 1024 * 1024).unwrap();
         let body = fs::read_to_string(&log).unwrap();
         let lines: Vec<&str> = body.lines().filter(|l| !l.is_empty()).collect();
         assert_eq!(lines.len(), 2);
@@ -132,7 +147,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let log = dir.path().join("missing-dir/cleanup.log");
         let settings = CleaningSettings::default();
-        let res = write_log_entry(&log, &settings, true, 1, &[]);
+        let res = write_log_entry(&log, &settings, true, 1, &[], 1024 * 1024);
         assert!(res.is_err());
     }
 
@@ -142,8 +157,48 @@ mod tests {
         let dir = tempdir().unwrap();
         let log = dir.path().join("cleanup.log");
         let settings = CleaningSettings::default();
-        write_log_entry(&log, &settings, true, 1, &[]).unwrap();
+        write_log_entry(&log, &settings, true, 1, &[], 1024 * 1024).unwrap();
         let mode = fs::metadata(&log).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn rotates_when_log_exceeds_max_bytes() {
+        let dir = tempdir().unwrap();
+        let log = dir.path().join("cleanup.log");
+        let rotated = dir.path().join("cleanup.log.1");
+        let settings = CleaningSettings::default();
+
+        // Write enough data to exceed the 32-byte threshold used below.
+        let big_content = "x".repeat(64);
+        fs::write(&log, big_content).unwrap();
+
+        write_log_entry(&log, &settings, false, 5, &[], 32).unwrap();
+
+        assert!(rotated.exists(), ".log.1 should exist after rotation");
+        let new_contents = fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = new_contents.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 1, "current log should have exactly one fresh entry");
+        let v: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(v["total_lines"], 5);
+    }
+
+    #[test]
+    fn rotation_drops_existing_dot1() {
+        let dir = tempdir().unwrap();
+        let log = dir.path().join("cleanup.log");
+        let rotated = dir.path().join("cleanup.log.1");
+        let settings = CleaningSettings::default();
+
+        fs::write(&log, "x".repeat(64)).unwrap();
+        fs::write(&rotated, "old rotated content").unwrap();
+
+        write_log_entry(&log, &settings, false, 7, &[], 32).unwrap();
+
+        let rotated_contents = fs::read_to_string(&rotated).unwrap();
+        assert!(
+            !rotated_contents.contains("old rotated content"),
+            ".log.1 should be replaced, not kept"
+        );
     }
 }

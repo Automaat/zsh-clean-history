@@ -33,6 +33,8 @@ struct Cli {
     remove_rare: bool,
     #[arg(long)]
     no_log: bool,
+    #[arg(long, default_value_t = 1024 * 1024)]
+    log_max_bytes: u64,
     #[command(subcommand)]
     cmd: Option<Cmd>,
 }
@@ -105,7 +107,7 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
     }
 
     if !cli.no_log {
-        if let Err(e) = write_log_entry(&paths.log, &settings, cli.dry_run, total_lines, &removals)
+        if let Err(e) = write_log_entry(&paths.log, &settings, cli.dry_run, total_lines, &removals, cli.log_max_bytes)
         {
             eprintln!("warning: could not write log: {e}");
         }
