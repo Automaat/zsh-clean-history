@@ -61,7 +61,7 @@ fn bk_radius(threshold: f64, query_char_count: usize) -> u32 {
 #[derive(Debug, Clone, Serialize)]
 pub struct Removal {
     pub line: usize,
-    pub reason: Arc<str>,
+    pub reason: String,
     pub command: String,
 }
 
@@ -88,7 +88,7 @@ pub fn identify_removals(
                 .unwrap_or_default();
             Removal {
                 line: idx,
-                reason,
+                reason: reason.to_string(),
                 command,
             }
         })

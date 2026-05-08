@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 #[cfg(unix)]
@@ -22,7 +21,7 @@ struct LogEntry<'a> {
     settings: SettingsView,
     total_lines: usize,
     removed_count: usize,
-    reason_counts: BTreeMap<Arc<str>, usize>,
+    reason_counts: BTreeMap<String, usize>,
     removals: Vec<LogRemoval<'a>>,
 }
 
@@ -62,7 +61,7 @@ pub fn write_log_entry(
     removals: &[Removal],
     max_bytes: u64,
 ) -> Result<()> {
-    let mut reason_counts: BTreeMap<Arc<str>, usize> = BTreeMap::new();
+    let mut reason_counts: BTreeMap<String, usize> = BTreeMap::new();
     for r in removals {
         *reason_counts.entry(r.reason.clone()).or_default() += 1;
     }
