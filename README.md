@@ -61,8 +61,9 @@ ZSH_CLEAN_HISTORY_AUTO_CLEAN=true
 # Similarity threshold 0..1 (default: 0.8)
 ZSH_CLEAN_HISTORY_SIMILARITY=0.85
 
-# Max occurrences considered "rare" (default: 3)
-ZSH_CLEAN_HISTORY_RARE_THRESHOLD=2
+# Max weighted score considered "rare" (default: 3.0).
+# Uses time-decay weights: 1.0 for <7d, 0.5 for 8-30d, 0.1 for 31d+.
+ZSH_CLEAN_HISTORY_RARE_THRESHOLD=2.0
 
 # Override binary location (default: search PATH, then plugin's target/)
 ZSH_CLEAN_HISTORY_BIN=/path/to/zsh-clean-history
@@ -71,7 +72,7 @@ ZSH_CLEAN_HISTORY_BIN=/path/to/zsh-clean-history
 ## CLI flags
 
 ```
-zsh-clean-history [--similarity F] [--rare-threshold N]
+zsh-clean-history [--similarity F] [--rare-threshold F]
                   [--dry-run] [--quiet] [--remove-rare] [--no-log]
 zsh-clean-history undo
 zsh-clean-history record-exit <timestamp> <code>

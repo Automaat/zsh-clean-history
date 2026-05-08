@@ -49,7 +49,7 @@ impl<'a> LogRemoval<'a> {
 #[derive(Serialize)]
 struct SettingsView {
     similarity: f64,
-    rare_threshold: usize,
+    rare_threshold: f64,
     remove_rare: bool,
 }
 
@@ -133,7 +133,7 @@ mod tests {
         let log = dir.path().join("cleanup.log");
         let settings = CleaningSettings {
             similarity_threshold: 0.85,
-            rare_threshold: 2,
+            rare_threshold: 2.0,
             remove_rare: true,
         };
         let removals = vec![Removal {

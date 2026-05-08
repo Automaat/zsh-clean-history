@@ -138,7 +138,7 @@ fn rare_variants(
 
     let by_base = group_by_base_strs(weighted_counts.keys().copied());
     for (&rare_cmd, &rare_weight) in &weighted_counts {
-        if rare_weight > settings.rare_threshold as f64 {
+        if rare_weight > settings.rare_threshold {
             continue;
         }
         let base = base_command(rare_cmd);
