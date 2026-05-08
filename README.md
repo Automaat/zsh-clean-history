@@ -121,13 +121,17 @@ clean-history --quiet
 
 ## Cleanup log
 
-Every run (dry-run or real) appends one JSON line to `~/.zsh_history_cleanup.log`:
+Every run (dry-run or real) appends one JSON line to `~/.zsh_history_cleanup.log`
+(created with mode `0600` on first write, since entries embed command text):
 
 ```json
 {"timestamp": "...", "dry_run": false, "settings": {...}, "total_lines": 858,
  "removed_count": 84, "reason_counts": {"Duplicate": 70, ...},
  "removals": [{"line": 56, "reason": "Failed similar to '...'", "command": "..."}, ...]}
 ```
+
+`removals[].line` is the **0-based index** into the parsed `~/.zsh_history`
+file (matches Python's `enumerate`, so the first command is `0`).
 
 Use `clean-history-log` for a quick summary, `clean-history-log --full` for the raw
 JSONL, or pipe through `jq` for analytics (`jq '.reason_counts | to_entries[]'`,

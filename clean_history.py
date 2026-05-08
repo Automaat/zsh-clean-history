@@ -13,6 +13,7 @@ import contextlib
 import json
 import re
 import shutil
+import sys
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -80,7 +81,8 @@ def similarity(a: str, b: str) -> float:
 
 def get_base_command(cmd: str) -> str:
     """Extract base command (first word) for grouping."""
-    return cmd.split(maxsplit=1)[0] if cmd.split() else cmd
+    parts = cmd.split(maxsplit=1)
+    return parts[0] if parts else cmd
 
 
 def find_duplicate_indices(
@@ -333,8 +335,18 @@ def _write_log(
         "removals": removals,
     }
 
-    with LOG_FILE.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    # Log writes are best-effort: cleanup may have already mutated history,
+    # so a failure here (read-only HOME, full disk, etc.) must not crash.
+    # Mirror ~/.zsh_history's 0o600 mode since the log embeds command text.
+    try:
+        first_create = not LOG_FILE.exists()
+        with LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if first_create:
+            with contextlib.suppress(OSError):
+                LOG_FILE.chmod(0o600)
+    except OSError as exc:
+        sys.stderr.write(f"warning: could not write {LOG_FILE}: {exc}\n")
 
 
 def main() -> None:

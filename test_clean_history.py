@@ -617,6 +617,54 @@ def test_write_log_appends_across_runs(tmp_path: Path) -> None:
     assert json.loads(lines[1])["total_lines"] == 11
 
 
+def test_write_log_swallows_oserror_and_warns(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An OSError on log write must not crash the run; a stderr warning is emitted."""
+    log_path = tmp_path / "missing-dir" / "cleanup.log"  # parent doesn't exist
+
+    args = argparse.Namespace(no_log=False, dry_run=True)
+    settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=False)
+
+    with patch("clean_history.LOG_FILE", log_path):
+        _write_log(args, settings, total_lines=1, removal_reasons={}, cmd_to_lines={})
+
+    captured = capsys.readouterr()
+    assert "warning" in captured.err.lower()
+    assert not log_path.exists()
+
+
+def test_write_log_creates_file_with_0600_mode(tmp_path: Path) -> None:
+    """First-time creation chmods the log to 0o600 to match ~/.zsh_history."""
+    log_path = tmp_path / "cleanup.log"
+
+    args = argparse.Namespace(no_log=False, dry_run=True)
+    settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=False)
+
+    with patch("clean_history.LOG_FILE", log_path):
+        _write_log(args, settings, total_lines=1, removal_reasons={}, cmd_to_lines={})
+
+    mode = log_path.stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_write_log_does_not_chmod_existing_file(tmp_path: Path) -> None:
+    """Subsequent writes should not chmod — user may have intentionally widened access."""
+    log_path = tmp_path / "cleanup.log"
+    log_path.touch()
+    log_path.chmod(0o644)
+
+    args = argparse.Namespace(no_log=False, dry_run=True)
+    settings = CleaningSettings(similarity_threshold=0.8, rare_threshold=3, remove_rare=False)
+
+    with patch("clean_history.LOG_FILE", log_path):
+        _write_log(args, settings, total_lines=1, removal_reasons={}, cmd_to_lines={})
+
+    mode = log_path.stat().st_mode & 0o777
+    assert mode == 0o644
+
+
 def test_main_writes_log_entry(tmp_path: Path) -> None:
     """main() produces a log entry by default; record reflects what was processed."""
     log_path = tmp_path / "cleanup.log"
