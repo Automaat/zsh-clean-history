@@ -20,8 +20,7 @@ pub fn load_exit_codes(path: &Path) -> Result<HashMap<String, i32>> {
         }
         if let Some((ts, code)) = line.split_once(':') {
             if let Ok(parsed) = code.parse::<i32>() {
-                let key = ts.split_once('.').map(|(s, _)| s).unwrap_or(ts);
-                out.insert(key.to_string(), parsed);
+                out.insert(ts.to_string(), parsed);
             }
         }
     }
@@ -46,7 +45,11 @@ pub fn compact_exits_file(path: &Path, keep_timestamps: &HashSet<String>) -> Res
     let total_before = exits.len();
     let kept: Vec<(String, i32)> = exits
         .into_iter()
-        .filter(|(ts, _)| keep_timestamps.contains(ts))
+        .filter(|(ts, _)| {
+            // ts may be decimal ("1700000000.123456"); keep_timestamps holds integer seconds
+            let prefix = ts.split_once('.').map(|(s, _)| s).unwrap_or(ts.as_str());
+            keep_timestamps.contains(prefix)
+        })
         .collect();
     let dropped = total_before.saturating_sub(kept.len());
 
@@ -75,7 +78,7 @@ mod tests {
         assert_eq!(map.get("1"), Some(&0));
         assert_eq!(map.get("2"), Some(&127));
         assert!(!map.contains_key("3"));
-        assert_eq!(map.get("1700000000"), Some(&0));
+        assert_eq!(map.get("1700000000.123456"), Some(&0));
     }
 
     #[test]
