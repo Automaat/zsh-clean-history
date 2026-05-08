@@ -220,7 +220,7 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String
                 if base_command(cmd) == rare {
                     // Only remove if this specific command has no successful runs —
                     // a successfully-used command is a legitimate distinct tool, not a typo.
-                    if parsed.successful_counts.contains_key(*cmd) {
+                    if parsed.successful_counts.contains_key(cmd) {
                         continue;
                     }
                     for &idx in idxs {
