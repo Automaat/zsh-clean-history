@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bk_tree::BKTree;
@@ -186,21 +186,27 @@ fn failed_similar_to_successful(
 }
 
 fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
-    let mut base_counts: HashMap<&str, usize> = HashMap::new();
-    for (cmd, &n) in parsed
-        .successful_counts
-        .iter()
-        .chain(parsed.failed_counts.iter())
-    {
-        *base_counts.entry(base_command(cmd)).or_default() += n;
+    // Count bases from successful runs only — failed typos must not inflate "common" bases
+    // and must not suppress rare-but-legitimate bases.
+    let mut success_base_counts: HashMap<&str, usize> = HashMap::new();
+    for (cmd, &n) in &parsed.successful_counts {
+        *success_base_counts.entry(base_command(cmd)).or_default() += n;
     }
 
-    let rare_bases: Vec<&str> = base_counts
-        .iter()
-        .filter(|(_, &c)| c <= 2)
-        .map(|(&b, _)| b)
+    // Candidate rare bases: bases that appear in failed_counts but have very few
+    // successful runs.  We source them from failed_counts so that a pure-failure
+    // typo base (0 successes) is still considered even though it is absent from
+    // success_base_counts.
+    let mut failed_bases: HashSet<&str> = HashSet::new();
+    for cmd in parsed.failed_counts.keys() {
+        failed_bases.insert(base_command(cmd));
+    }
+    let rare_bases: Vec<&str> = failed_bases
+        .into_iter()
+        .filter(|b| success_base_counts.get(b).copied().unwrap_or(0) <= 2)
         .collect();
-    let mut common_bases: Vec<(&str, usize)> = base_counts
+
+    let mut common_bases: Vec<(&str, usize)> = success_base_counts
         .iter()
         .filter(|(_, &c)| c >= 20)
         .map(|(&b, &c)| (b, c))
@@ -212,6 +218,11 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String
             let reason = format!("Cross-base typo of '{common}'");
             for (cmd, idxs) in &parsed.cmd_to_lines {
                 if base_command(cmd) == rare {
+                    // Only remove if this specific command has no successful runs —
+                    // a successfully-used command is a legitimate distinct tool, not a typo.
+                    if parsed.successful_counts.contains_key(*cmd) {
+                        continue;
+                    }
                     for &idx in idxs {
                         removals.entry(idx).or_insert_with(|| reason.clone());
                     }
@@ -406,7 +417,8 @@ mod tests {
         for (j, cmd) in rare_cmds.iter().enumerate() {
             let ts = base + j;
             text.push_str(&format!(": {ts}:0;{cmd}\n"));
-            exits.push((ts.to_string(), 0));
+            // Typo commands are failures — exit code 1
+            exits.push((ts.to_string(), 1));
         }
         (text, exits)
     }
@@ -466,6 +478,29 @@ mod tests {
     }
 
     #[test]
+    fn cross_base_no_false_positive_dl1_successful_tool() {
+        // fd is DL-distance 1 from cd; if fd runs successfully it must NOT be removed
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=20usize {
+            text.push_str(&format!(": {i}:0;cd /home\n"));
+            exits.push((i.to_string(), 0));
+        }
+        text.push_str(": 21:0;fd foo\n");
+        exits.push(("21".to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let removals = identify_removals(&h, &CleaningSettings::default());
+        let flagged = removals
+            .iter()
+            .any(|r| r.command == "fd foo" && r.reason.contains("Cross-base typo"));
+        assert!(
+            !flagged,
+            "fd (successful) must not be flagged as cd typo; removals: {removals:?}"
+        );
+    }
+
+    #[test]
     fn cross_base_does_not_override_existing() {
         // gti status appears twice → first gets Duplicate; cross-base should not override
         let mut text = String::new();
@@ -493,23 +528,28 @@ mod tests {
 
     #[test]
     fn cross_base_rare_threshold_boundary() {
-        // rare base has count=3 → threshold is <=2, so must NOT be flagged
-        let (text, exits) = build_cross_base_history(
-            "git",
-            "git status",
-            20,
-            &["gti status", "gti log", "gti diff"],
-        );
+        // rare base has 3 successful runs (success count=3 > 2) → must NOT be flagged
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 1..=20usize {
+            text.push_str(&format!(": {i}:0;git status\n"));
+            exits.push((i.to_string(), 0));
+        }
+        // 3 successful uses of gti — it's a legitimate (if confusingly-named) tool
+        for ts in 21usize..=23 {
+            text.push_str(&format!(": {ts}:0;gti status\n"));
+            exits.push((ts.to_string(), 0));
+        }
         let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
         let h = parse_with_exits(&text, &exits_ref);
         let removals = identify_removals(&h, &CleaningSettings::default(), None);
-        // gti base total=3 > 2 → not flagged
+        // gti success count=3 > 2 → not in rare_bases → not flagged
         let flagged = removals
             .iter()
             .any(|r| r.reason.contains("Cross-base typo"));
         assert!(
             !flagged,
-            "base with count=3 should not be flagged; removals: {removals:?}"
+            "base with 3 successful runs should not be flagged; removals: {removals:?}"
         );
     }
 
