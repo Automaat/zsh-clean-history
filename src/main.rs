@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use zsh_clean_history::allowlist::load_allowlist;
 use zsh_clean_history::clean::{LockedHistory, run_cleanup};
 use zsh_clean_history::cleaner::Removal;
 use zsh_clean_history::{
@@ -98,7 +99,8 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
 
     let exit_codes = load_exit_codes(&paths.exits)?;
     let parsed = parse_history_file(&paths.history, &exit_codes)?;
-    let removals = identify_removals(&parsed, &settings);
+    let allowlist = load_allowlist(&paths.allowlist)?;
+    let removals = identify_removals(&parsed, &settings, allowlist.as_ref());
     let removal_map: HashMap<usize, &Removal> = removals.iter().map(|r| (r.line, r)).collect();
 
     let success_count = parsed.successful_counts.get(command).copied().unwrap_or(0);

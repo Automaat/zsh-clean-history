@@ -1,3 +1,4 @@
+pub mod allowlist;
 pub mod clean;
 pub mod cleaner;
 pub mod exits;

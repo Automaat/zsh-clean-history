@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use regex::RegexSet;
 use serde::Serialize;
 
 use crate::history::ParsedHistory;
@@ -15,7 +16,11 @@ pub struct Removal {
     pub command: String,
 }
 
-pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) -> Vec<Removal> {
+pub fn identify_removals(
+    parsed: &ParsedHistory,
+    settings: &CleaningSettings,
+    allowlist: Option<&RegexSet>,
+) -> Vec<Removal> {
     let mut removals: HashMap<usize, String> = HashMap::new();
     dedup_keep_newest(parsed, &mut removals);
     mark_secrets(parsed, &mut removals);
@@ -39,6 +44,9 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
         })
         .collect();
     out.sort_by_key(|r| r.line);
+    if let Some(set) = allowlist {
+        out.retain(|r| r.reason.starts_with("Secret pattern:") || !set.is_match(&r.command));
+    }
     out
 }
 
@@ -207,7 +215,7 @@ mod tests {
             ": 1:0;ls\n: 2:0;pwd\n: 3:0;ls\n: 4:0;ls\n",
             &[("1", 0), ("2", 0), ("3", 0), ("4", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         let lines: Vec<usize> = removals.iter().map(|r| r.line).collect();
         assert_eq!(lines, vec![0, 2]);
         assert!(removals.iter().all(|r| r.reason == "Duplicate"));
@@ -219,7 +227,7 @@ mod tests {
             ": 1:0;git statsu\n: 2:0;git status\n: 3:0;git status\n",
             &[("1", 1), ("2", 0), ("3", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         let hit = removals
             .iter()
             .any(|r| r.line == 0 && r.reason.contains("Failed similar"));
@@ -232,7 +240,7 @@ mod tests {
             ": 1:0;mise ins\n: 2:0;mise install\n: 3:0;mise install\n",
             &[("1", 1), ("2", 0), ("3", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         let hit = removals
             .iter()
             .any(|r| r.line == 0 && r.reason.contains("Failed prefix"));
@@ -242,7 +250,7 @@ mod tests {
     #[test]
     fn different_base_command_not_removed() {
         let h = parse_with_exits(": 1:0;ls -la\n: 2:0;git status\n", &[("1", 1), ("2", 0)]);
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         assert!(removals.is_empty());
     }
 
@@ -252,7 +260,7 @@ mod tests {
             ": 1:0;git push origin feature-1\n: 2:0;git push origin feature-2\n: 3:0;git push origin feature-2\n",
             &[("1", 1), ("2", 0), ("3", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         let flagged = removals
             .iter()
             .any(|r| r.line == 0 && r.reason.contains("Failed similar"));
@@ -265,7 +273,7 @@ mod tests {
             ": 1:0;git statsu\n: 2:0;git status\n: 3:0;git status\n",
             &[("1", 1), ("2", 0), ("3", 0)],
         );
-        let removals = identify_removals(&h, &CleaningSettings::default());
+        let removals = identify_removals(&h, &CleaningSettings::default(), None);
         let hit = removals
             .iter()
             .any(|r| r.line == 0 && r.reason.contains("Failed similar"));
@@ -311,7 +319,7 @@ mod tests {
             remove_rare: true,
             ..Default::default()
         };
-        let removals = identify_removals(&h, &s);
+        let removals = identify_removals(&h, &s, None);
         // statsu weighted=1.0, status weighted=2.0; 2.0 <= 1.0*3=3.0 → not removed
         let rare_removed = removals.iter().any(|r| r.reason.contains("Rare variant"));
         assert!(!rare_removed);
@@ -338,7 +346,7 @@ mod tests {
             remove_rare: true,
             ..Default::default()
         };
-        let removals = identify_removals(&h, &s);
+        let removals = identify_removals(&h, &s, None);
         let rare_removed = removals.iter().any(|r| r.reason.contains("Rare variant"));
         assert!(rare_removed);
     }
@@ -357,12 +365,41 @@ mod tests {
             remove_rare: true,
             ..Default::default()
         };
-        let removals = identify_removals(&h, &s);
+        let removals = identify_removals(&h, &s, None);
         let rare_lines: Vec<usize> = removals
             .iter()
             .filter(|r| r.reason.contains("Rare variant"))
             .map(|r| r.line)
             .collect();
         assert_eq!(rare_lines, vec![20]);
+    }
+
+    #[test]
+    fn allowlist_protects_matching_commands() {
+        // Without allowlist: duplicate kubectl is removed
+        let h = parse_with_exits(
+            ": 1:0;kubectl get pods\n: 2:0;kubectl get pods\n",
+            &[("1", 0), ("2", 0)],
+        );
+        let without = identify_removals(&h, &CleaningSettings::default(), None);
+        assert_eq!(without.len(), 1);
+
+        // With allowlist matching ^kubectl: nothing removed
+        let allowlist = RegexSet::new(["^kubectl "]).unwrap();
+        let with_list = identify_removals(&h, &CleaningSettings::default(), Some(&allowlist));
+        assert!(with_list.is_empty());
+    }
+
+    #[test]
+    fn allowlist_does_not_suppress_secret_removals() {
+        // ^export matches, but the command contains a secret — must still be removed
+        let h = parse_with_exits(
+            ": 1:0;export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY\n",
+            &[("1", 0)],
+        );
+        let allowlist = RegexSet::new(["^export "]).unwrap();
+        let removals = identify_removals(&h, &CleaningSettings::default(), Some(&allowlist));
+        assert_eq!(removals.len(), 1);
+        assert!(removals[0].reason.starts_with("Secret pattern:"));
     }
 }
