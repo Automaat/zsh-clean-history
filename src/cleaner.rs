@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -102,21 +103,42 @@ fn failed_similar_to_successful(
     }
 }
 
+fn time_decay_weight(timestamp_secs: i64, now_secs: i64) -> f64 {
+    const SEVEN_DAYS: i64 = 7 * 24 * 3600;
+    const THIRTY_DAYS: i64 = 30 * 24 * 3600;
+    let age = now_secs.saturating_sub(timestamp_secs).max(0);
+    if age <= SEVEN_DAYS {
+        1.0
+    } else if age <= THIRTY_DAYS {
+        0.5
+    } else {
+        0.1
+    }
+}
+
 fn rare_variants(
     parsed: &ParsedHistory,
     settings: &CleaningSettings,
     removals: &mut HashMap<usize, String>,
 ) {
-    let mut all_counts: HashMap<&str, usize> = HashMap::new();
-    for (cmd, &n) in &parsed.successful_counts {
-        *all_counts.entry(cmd.as_str()).or_default() += n;
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    let mut weighted_counts: HashMap<&str, f64> = HashMap::new();
+    for entry in &parsed.entries {
+        if let (Some(ts_str), Some(cmd)) = (&entry.timestamp, &entry.command) {
+            if let Ok(ts) = ts_str.parse::<i64>() {
+                let w = time_decay_weight(ts, now_secs);
+                *weighted_counts.entry(cmd.as_str()).or_default() += w;
+            }
+        }
     }
-    for (cmd, &n) in &parsed.failed_counts {
-        *all_counts.entry(cmd.as_str()).or_default() += n;
-    }
-    let by_base = group_by_base_strs(all_counts.keys().copied());
-    for (rare_cmd, &rare_count) in &all_counts {
-        if rare_count > settings.rare_threshold {
+
+    let by_base = group_by_base_strs(weighted_counts.keys().copied());
+    for (&rare_cmd, &rare_weight) in &weighted_counts {
+        if rare_weight > settings.rare_threshold {
             continue;
         }
         let base = base_command(rare_cmd);
@@ -124,15 +146,15 @@ fn rare_variants(
             continue;
         };
         for &common_cmd in candidates {
-            if common_cmd == *rare_cmd {
+            if common_cmd == rare_cmd {
                 continue;
             }
-            let common_count = all_counts.get(common_cmd).copied().unwrap_or(0);
-            if common_count <= rare_count.saturating_mul(3) {
+            let common_weight = weighted_counts.get(common_cmd).copied().unwrap_or(0.0);
+            if common_weight <= rare_weight * 3.0 {
                 continue;
             }
             if command_similar(rare_cmd, common_cmd, settings.similarity_threshold) {
-                if let Some(indices) = parsed.cmd_to_lines.get(*rare_cmd) {
+                if let Some(indices) = parsed.cmd_to_lines.get(rare_cmd) {
                     let reason = format!("Rare variant of '{common_cmd}'");
                     for &idx in indices {
                         removals.entry(idx).or_insert_with(|| reason.clone());
@@ -248,6 +270,77 @@ mod tests {
             .iter()
             .any(|r| r.line == 0 && r.reason.contains("Failed similar"));
         assert!(hit);
+    }
+
+    #[test]
+    fn time_decay_weight_buckets() {
+        let now = 1_000_000_000i64;
+        assert_eq!(time_decay_weight(now, now), 1.0);
+        assert_eq!(time_decay_weight(now - 3 * 24 * 3600, now), 1.0);
+        assert_eq!(time_decay_weight(now - 7 * 24 * 3600, now), 1.0);
+        assert_eq!(time_decay_weight(now - 14 * 24 * 3600, now), 0.5);
+        assert_eq!(time_decay_weight(now - 30 * 24 * 3600, now), 0.5);
+        assert_eq!(time_decay_weight(now - 31 * 24 * 3600, now), 0.1);
+        assert_eq!(time_decay_weight(now - 365 * 24 * 3600, now), 0.1);
+    }
+
+    #[test]
+    fn recent_rare_variant_protected_when_old_common_exists() {
+        // recent typo with low weighted count should still be removed if old common vastly outnumbers it
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        // 20 old entries (weight 0.1 each = 2.0) of git status
+        // 1 recent entry (weight 1.0) of git statsu
+        // weighted: status=2.0, statsu=1.0; 2.0 > 1.0*3? No → statsu NOT removed
+        let old_ts = now - 40 * 24 * 3600;
+        let recent_ts = now - 1;
+        let mut text = String::new();
+        for i in 0..20 {
+            text.push_str(&format!(": {}:0;git status\n", old_ts + i));
+        }
+        text.push_str(&format!(": {recent_ts}:0;git statsu\n"));
+        let exits: Vec<(String, i32)> = (0..20)
+            .map(|i| ((old_ts + i).to_string(), 0))
+            .chain(std::iter::once((recent_ts.to_string(), 0)))
+            .collect();
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let s = CleaningSettings {
+            remove_rare: true,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s);
+        // statsu weighted=1.0, status weighted=2.0; 2.0 <= 1.0*3=3.0 → not removed
+        let rare_removed = removals.iter().any(|r| r.reason.contains("Rare variant"));
+        assert!(!rare_removed);
+    }
+
+    #[test]
+    fn old_rare_variant_removed_when_common_dominates() {
+        // 40 old entries (weight 0.1 = 4.0) vs 1 old entry (0.1)
+        // 4.0 > 0.1 * 3 = 0.3 → removed
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let old_ts = now - 40 * 24 * 3600;
+        let mut text = String::new();
+        for i in 0..40 {
+            text.push_str(&format!(": {}:0;git status\n", old_ts + i));
+        }
+        text.push_str(&format!(": {}:0;git statsu\n", old_ts + 40));
+        let exits: Vec<(String, i32)> = (0..=40).map(|i| ((old_ts + i).to_string(), 0)).collect();
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let s = CleaningSettings {
+            remove_rare: true,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s);
+        let rare_removed = removals.iter().any(|r| r.reason.contains("Rare variant"));
+        assert!(rare_removed);
     }
 
     #[test]

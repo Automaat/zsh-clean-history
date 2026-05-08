@@ -13,8 +13,8 @@ const DEFAULT_LOG_MAX_BYTES: u64 = 1_048_576;
 struct Cli {
     #[arg(long, default_value_t = 0.8)]
     similarity: f64,
-    #[arg(long, default_value_t = 3)]
-    rare_threshold: usize,
+    #[arg(long, default_value_t = 3.0)]
+    rare_threshold: f64,
     #[arg(long)]
     dry_run: bool,
     #[arg(long, short = 'v')]
