@@ -17,6 +17,8 @@ jobs:
     - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
       env:
         GITHUB_TOKEN: ${{ github.token }}
+    - name: Install Rust components
+      run: rustup component add rustfmt clippy
     - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
     - name: cargo fmt
       run: cargo fmt --all -- --check
