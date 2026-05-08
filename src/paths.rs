@@ -6,6 +6,7 @@ pub struct Paths {
     pub history: PathBuf,
     pub exits: PathBuf,
     pub log: PathBuf,
+    pub allowlist: PathBuf,
 }
 
 impl Paths {
@@ -17,6 +18,7 @@ impl Paths {
             history: home.join(".zsh_history"),
             exits: home.join(".zsh_history_exits"),
             log: home.join(".zsh_history_cleanup.log"),
+            allowlist: home.join(".zsh_history_keep"),
         })
     }
 

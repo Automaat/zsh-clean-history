@@ -118,3 +118,65 @@ fn compaction_runs_even_when_no_removals() {
     assert!(!exits_after.contains("9999"));
     assert!(!exits_after.contains("8888"));
 }
+
+#[test]
+fn dry_run_verbose_shows_sample_removals() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    fs::write(
+        home.join(".zsh_history"),
+        ": 1:0;git statsu\n: 2:0;git status\n: 3:0;git status\n",
+    )
+    .unwrap();
+    fs::write(home.join(".zsh_history_exits"), "1:1\n2:0\n3:0\n").unwrap();
+
+    run(home, &["--dry-run", "--verbose"])
+        .success()
+        .stdout(predicates::str::contains("Failed similar to 'git status'"))
+        .stdout(predicates::str::contains("git statsu"));
+}
+
+#[test]
+fn cross_base_typo_removed_in_cleanup() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+
+    let mut history = String::new();
+    let mut exits = String::new();
+    for i in 1..=20usize {
+        history.push_str(&format!(": {i}:0;git status\n"));
+        exits.push_str(&format!("{i}:0\n"));
+    }
+    history.push_str(": 21:0;gti status\n");
+    exits.push_str("21:1\n");
+
+    fs::write(home.join(".zsh_history"), &history).unwrap();
+    fs::write(home.join(".zsh_history_exits"), &exits).unwrap();
+
+    run(home, &["--dry-run", "--verbose"])
+        .success()
+        .stdout(predicates::str::contains("gti status"))
+        .stdout(predicates::str::contains("Cross-base typo of 'git'"));
+}
+
+#[test]
+fn cross_base_typo_explain() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+
+    let mut history = String::new();
+    let mut exits = String::new();
+    for i in 1..=20usize {
+        history.push_str(&format!(": {i}:0;git status\n"));
+        exits.push_str(&format!("{i}:0\n"));
+    }
+    history.push_str(": 21:0;gti status\n");
+    exits.push_str("21:1\n");
+
+    fs::write(home.join(".zsh_history"), &history).unwrap();
+    fs::write(home.join(".zsh_history_exits"), &exits).unwrap();
+
+    run(home, &["explain", "gti status"])
+        .success()
+        .stdout(predicates::str::contains("Cross-base typo of 'git'"));
+}
