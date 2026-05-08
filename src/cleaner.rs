@@ -331,9 +331,7 @@ mod tests {
             text.push_str(&format!(": {}:0;git status\n", old_ts + i));
         }
         text.push_str(&format!(": {}:0;git statsu\n", old_ts + 40));
-        let exits: Vec<(String, i32)> = (0..=40)
-            .map(|i| ((old_ts + i).to_string(), 0))
-            .collect();
+        let exits: Vec<(String, i32)> = (0..=40).map(|i| ((old_ts + i).to_string(), 0)).collect();
         let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
         let h = parse_with_exits(&text, &exits_ref);
         let s = CleaningSettings {
