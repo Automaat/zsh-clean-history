@@ -10,17 +10,21 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import re
 import shutil
+import sys
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
 
 HISTORY_FILE = Path.home() / ".zsh_history"
 EXIT_FILE = Path.home() / ".zsh_history_exits"
+LOG_FILE = Path.home() / ".zsh_history_cleanup.log"
 BACKUP_SUFFIX = ".backup"
 SAMPLE_SIZE = 20  # Number of sample removals to show
 
@@ -77,7 +81,8 @@ def similarity(a: str, b: str) -> float:
 
 def get_base_command(cmd: str) -> str:
     """Extract base command (first word) for grouping."""
-    return cmd.split()[0] if cmd.split() else cmd
+    parts = cmd.split(maxsplit=1)
+    return parts[0] if parts else cmd
 
 
 def find_duplicate_indices(
@@ -279,6 +284,11 @@ def _parse_arguments() -> tuple[CleaningSettings, argparse.Namespace]:
         action="store_true",
         help="Remove rare command variants (default: keep them)",
     )
+    parser.add_argument(
+        "--no-log",
+        action="store_true",
+        help="Skip appending run summary to ~/.zsh_history_cleanup.log",
+    )
 
     args = parser.parse_args()
 
@@ -289,6 +299,54 @@ def _parse_arguments() -> tuple[CleaningSettings, argparse.Namespace]:
     )
 
     return settings, args
+
+
+def _write_log(
+    args: argparse.Namespace,
+    settings: CleaningSettings,
+    total_lines: int,
+    removal_reasons: dict[int, str],
+    cmd_to_lines: dict[str, list[int]],
+) -> None:
+    """Append one JSONL entry summarising this run."""
+    if args.no_log:
+        return
+
+    idx_to_cmd: dict[int, str] = {
+        idx: cmd for cmd, indices in cmd_to_lines.items() for idx in indices
+    }
+
+    removals = [
+        {"line": idx, "reason": reason, "command": idx_to_cmd.get(idx, "")}
+        for idx, reason in sorted(removal_reasons.items())
+    ]
+
+    entry = {
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+        "dry_run": args.dry_run,
+        "settings": {
+            "similarity": settings.similarity_threshold,
+            "rare_threshold": settings.rare_threshold,
+            "remove_rare": settings.remove_rare,
+        },
+        "total_lines": total_lines,
+        "removed_count": len(removal_reasons),
+        "reason_counts": dict(Counter(removal_reasons.values())),
+        "removals": removals,
+    }
+
+    # Log writes are best-effort: cleanup may have already mutated history,
+    # so a failure here (read-only HOME, full disk, etc.) must not crash.
+    # Mirror ~/.zsh_history's 0o600 mode since the log embeds command text.
+    try:
+        first_create = not LOG_FILE.exists()
+        with LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if first_create:
+            with contextlib.suppress(OSError):
+                LOG_FILE.chmod(0o600)
+    except OSError as exc:
+        sys.stderr.write(f"warning: could not write {LOG_FILE}: {exc}\n")
 
 
 def main() -> None:
@@ -326,6 +384,8 @@ def main() -> None:
             for idx, line in enumerate(all_lines):
                 if idx not in lines_to_remove:
                     f.write(line + "\n")
+
+    _write_log(args, settings, len(all_lines), _removal_reasons, cmd_to_lines)
 
     if removed_count > 0 and not args.quiet:
         # Count removals by reason
