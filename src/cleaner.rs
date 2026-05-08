@@ -208,7 +208,7 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, String
 
     let mut common_bases: Vec<(&str, usize)> = success_base_counts
         .iter()
-        .filter(|(_, &c)| c >= 20)
+        .filter(|&(_, &c)| c >= 20)
         .map(|(&b, &c)| (b, c))
         .collect();
     common_bases.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
