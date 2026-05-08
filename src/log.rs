@@ -182,7 +182,11 @@ mod tests {
         assert!(rotated.exists(), ".log.1 should exist after rotation");
         let new_contents = fs::read_to_string(&log).unwrap();
         let lines: Vec<&str> = new_contents.lines().filter(|l| !l.is_empty()).collect();
-        assert_eq!(lines.len(), 1, "current log should have exactly one fresh entry");
+        assert_eq!(
+            lines.len(),
+            1,
+            "current log should have exactly one fresh entry"
+        );
         let v: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(v["total_lines"], 5);
     }

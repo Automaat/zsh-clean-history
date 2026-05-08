@@ -107,8 +107,14 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
     }
 
     if !cli.no_log {
-        if let Err(e) = write_log_entry(&paths.log, &settings, cli.dry_run, total_lines, &removals, cli.log_max_bytes)
-        {
+        if let Err(e) = write_log_entry(
+            &paths.log,
+            &settings,
+            cli.dry_run,
+            total_lines,
+            &removals,
+            cli.log_max_bytes,
+        ) {
             eprintln!("warning: could not write log: {e}");
         }
     }
