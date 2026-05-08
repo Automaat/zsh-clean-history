@@ -100,7 +100,6 @@ mod tests {
             line: 3,
             reason: "Failed similar to 'git status'".into(),
             command: "git statsu".into(),
-            candidate: Some("git status".into()),
         }];
         write_log_entry(&log, &settings, true, 42, &removals).unwrap();
 

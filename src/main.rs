@@ -163,10 +163,6 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
         print!("  [{idx}] ");
         if let Some(removal) = removal_map.get(&idx) {
             print!("REMOVE  reason: {}", removal.reason);
-            if let Some(ref candidate) = removal.candidate {
-                let sim = zsh_clean_history::similarity::ratio(command, candidate);
-                print!("  similarity: {sim:.2}");
-            }
         } else {
             print!("KEEP");
         }

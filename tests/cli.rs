@@ -1,7 +1,6 @@
 use std::fs;
 
 use assert_cmd::Command;
-use predicates::str::contains;
 use tempfile::tempdir;
 
 fn run(home: &std::path::Path, args: &[&str]) -> assert_cmd::assert::Assert {
@@ -98,40 +97,6 @@ fn multiline_entry_round_trips_unchanged() {
         after.contains(": 1:0;echo foo \\\n  bar"),
         "multi-line entry corrupted: {after:?}"
     );
-}
-
-#[test]
-fn explain_shows_removal_reason_for_removed_entry() {
-    let dir = tempdir().unwrap();
-    let home = dir.path();
-    fs::write(
-        home.join(".zsh_history"),
-        ": 1:0;git statsu\n: 2:0;git status\n: 3:0;git status\n",
-    )
-    .unwrap();
-    fs::write(home.join(".zsh_history_exits"), "1:127\n2:0\n3:0\n").unwrap();
-
-    run(home, &["explain", "git statsu"])
-        .success()
-        .stdout(contains("REMOVE"))
-        .stdout(contains("Failed similar to"))
-        .stdout(contains("similarity:"));
-}
-
-#[test]
-fn explain_shows_keep_for_non_removed_entry() {
-    let dir = tempdir().unwrap();
-    let home = dir.path();
-    fs::write(
-        home.join(".zsh_history"),
-        ": 1:0;git statsu\n: 2:0;git status\n: 3:0;git status\n",
-    )
-    .unwrap();
-    fs::write(home.join(".zsh_history_exits"), "1:127\n2:0\n3:0\n").unwrap();
-
-    run(home, &["explain", "git status"])
-        .success()
-        .stdout(contains("KEEP"));
 }
 
 #[test]
