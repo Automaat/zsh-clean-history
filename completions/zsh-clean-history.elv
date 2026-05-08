@@ -22,6 +22,8 @@ set edit:completion:arg-completer[zsh-clean-history] = {|@words|
             cand --rare-threshold 'rare-threshold'
             cand --log-max-bytes 'log-max-bytes'
             cand --dry-run 'dry-run'
+            cand -v 'v'
+            cand --verbose 'verbose'
             cand -q 'q'
             cand --quiet 'quiet'
             cand --remove-rare 'remove-rare'

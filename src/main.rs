@@ -111,8 +111,17 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
             }
             let mut entries: Vec<_> = counts.into_iter().collect();
             entries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-            for (reason, count) in entries {
+            for (reason, count) in &entries {
                 println!("  {reason}: {count}");
+                if cli.dry_run && cli.verbose {
+                    for sample in removals
+                        .iter()
+                        .filter(|r| r.reason.as_str() == *reason)
+                        .take(5)
+                    {
+                        println!("    {}", truncate_cmd(&sample.command, 70));
+                    }
+                }
             }
         }
     }
@@ -154,6 +163,18 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn truncate_cmd(cmd: &str, max_chars: usize) -> String {
+    if max_chars < 3 {
+        return cmd.to_string();
+    }
+    let chars: Vec<char> = cmd.chars().collect();
+    if chars.len() <= max_chars {
+        cmd.to_string()
+    } else {
+        format!("{}...", chars[..max_chars - 3].iter().collect::<String>())
+    }
 }
 
 fn write_history_atomically(

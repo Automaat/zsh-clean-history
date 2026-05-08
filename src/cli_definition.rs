@@ -17,6 +17,8 @@ struct Cli {
     rare_threshold: usize,
     #[arg(long)]
     dry_run: bool,
+    #[arg(long, short = 'v')]
+    verbose: bool,
     #[arg(long, short)]
     quiet: bool,
     #[arg(long)]
