@@ -5,36 +5,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bk_tree::BKTree;
 use regex::RegexSet;
 use serde::Serialize;
-use strsim::damerau_levenshtein;
 
 use crate::history::ParsedHistory;
 use crate::secrets::mark_secrets;
 use crate::settings::CleaningSettings;
-use crate::similarity::{base_command, bases_within_dl1, command_similar};
-
-struct DLMetric;
-
-impl bk_tree::Metric<String> for DLMetric {
-    fn distance(&self, a: &String, b: &String) -> u32 {
-        damerau_levenshtein(a, b) as u32
-    }
-
-    fn threshold_distance(&self, a: &String, b: &String, threshold: u32) -> Option<u32> {
-        let dist = self.distance(a, b);
-        (dist <= threshold).then_some(dist)
-    }
-}
+use crate::similarity::{
+    DamerauLevenshteinMetric, base_command, bases_within_dl1, bk_radius, command_similar,
+};
 
 struct SuccessBucketIndex {
     sorted: Vec<String>,
-    tree: BKTree<String, DLMetric>,
+    tree: BKTree<String, DamerauLevenshteinMetric>,
 }
 
 impl SuccessBucketIndex {
     fn build(commands: &[&str]) -> Self {
         let mut sorted: Vec<String> = commands.iter().map(|&s| s.to_owned()).collect();
         sorted.sort_unstable();
-        let mut tree = BKTree::new(DLMetric);
+        let mut tree = BKTree::new(DamerauLevenshteinMetric);
         for cmd in &sorted {
             tree.add(cmd.clone());
         }
@@ -49,13 +37,6 @@ fn build_bucket_indices<'a>(
         .iter()
         .map(|(&base, cmds)| (base, SuccessBucketIndex::build(cmds)))
         .collect()
-}
-
-fn bk_radius(threshold: f64, query_char_count: usize) -> u32 {
-    if threshold >= 1.0 || query_char_count == 0 {
-        return 0;
-    }
-    ((1.0 - threshold) / threshold * query_char_count as f64).ceil() as u32
 }
 
 #[derive(Debug, Clone, Serialize)]
