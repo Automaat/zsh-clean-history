@@ -2,3 +2,4 @@ target/
 Cargo.lock.bak
 *.backup
 .DS_Store
+core.*

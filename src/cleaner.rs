@@ -4,18 +4,17 @@ use serde::Serialize;
 
 use crate::history::ParsedHistory;
 use crate::settings::CleaningSettings;
-use crate::similarity::{base_command, ratio};
+use crate::similarity::{base_command, command_similar};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Removal {
     pub line: usize,
     pub reason: String,
     pub command: String,
-    pub candidate: Option<String>,
 }
 
 pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) -> Vec<Removal> {
-    let mut removals: HashMap<usize, (String, Option<String>)> = HashMap::new();
+    let mut removals: HashMap<usize, String> = HashMap::new();
     dedup_keep_newest(parsed, &mut removals);
     failed_similar_to_successful(parsed, settings, &mut removals);
     if settings.remove_rare {
@@ -23,7 +22,7 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
     }
     let mut out: Vec<Removal> = removals
         .into_iter()
-        .map(|(idx, (reason, candidate))| {
+        .map(|(idx, reason)| {
             let command = parsed
                 .entries
                 .get(idx)
@@ -33,7 +32,6 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
                 line: idx,
                 reason,
                 command,
-                candidate,
             }
         })
         .collect();
@@ -41,10 +39,7 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
     out
 }
 
-fn dedup_keep_newest(
-    parsed: &ParsedHistory,
-    removals: &mut HashMap<usize, (String, Option<String>)>,
-) {
+fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
     for (cmd, indices) in &parsed.cmd_to_lines {
         if indices.len() <= 1 {
             continue;
@@ -54,7 +49,7 @@ fn dedup_keep_newest(
             if idx != keep {
                 removals
                     .entry(idx)
-                    .or_insert_with(|| ("Duplicate".to_string(), None));
+                    .or_insert_with(|| "Duplicate".to_string());
             }
         }
     }
@@ -63,7 +58,7 @@ fn dedup_keep_newest(
 fn failed_similar_to_successful(
     parsed: &ParsedHistory,
     settings: &CleaningSettings,
-    removals: &mut HashMap<usize, (String, Option<String>)>,
+    removals: &mut HashMap<usize, String>,
 ) {
     let by_base = group_by_base_strings(parsed.successful_counts.keys());
     for (failed_cmd, &fail_count) in &parsed.failed_counts {
@@ -72,7 +67,7 @@ fn failed_similar_to_successful(
             Some(v) => v,
             None => continue,
         };
-        let mut chosen: Option<(String, Option<String>)> = None;
+        let mut chosen: Option<String> = None;
         for &success_cmd in candidates {
             if success_cmd == failed_cmd {
                 continue;
@@ -87,25 +82,18 @@ fn failed_similar_to_successful(
             }
             if success_cmd.starts_with(failed_cmd.as_str()) && success_cmd.len() > failed_cmd.len()
             {
-                chosen = Some((
-                    format!("Failed prefix of '{success_cmd}'"),
-                    Some(success_cmd.to_string()),
-                ));
+                chosen = Some(format!("Failed prefix of '{success_cmd}'"));
                 break;
             }
-            let sim = ratio(failed_cmd, success_cmd);
-            if (settings.similarity_threshold..1.0).contains(&sim) {
-                chosen = Some((
-                    format!("Failed similar to '{success_cmd}'"),
-                    Some(success_cmd.to_string()),
-                ));
+            if command_similar(failed_cmd, success_cmd, settings.similarity_threshold) {
+                chosen = Some(format!("Failed similar to '{success_cmd}'"));
                 break;
             }
         }
-        if let Some(entry) = chosen {
+        if let Some(reason) = chosen {
             if let Some(indices) = parsed.cmd_to_lines.get(failed_cmd) {
                 for &idx in indices {
-                    removals.entry(idx).or_insert_with(|| entry.clone());
+                    removals.entry(idx).or_insert_with(|| reason.clone());
                 }
             }
         }
@@ -115,7 +103,7 @@ fn failed_similar_to_successful(
 fn rare_variants(
     parsed: &ParsedHistory,
     settings: &CleaningSettings,
-    removals: &mut HashMap<usize, (String, Option<String>)>,
+    removals: &mut HashMap<usize, String>,
 ) {
     let mut all_counts: HashMap<&str, usize> = HashMap::new();
     for (cmd, &n) in &parsed.successful_counts {
@@ -141,15 +129,11 @@ fn rare_variants(
             if common_count <= rare_count.saturating_mul(3) {
                 continue;
             }
-            let sim = ratio(rare_cmd, common_cmd);
-            if sim >= settings.similarity_threshold {
+            if command_similar(rare_cmd, common_cmd, settings.similarity_threshold) {
                 if let Some(indices) = parsed.cmd_to_lines.get(*rare_cmd) {
-                    let entry = (
-                        format!("Rare variant of '{common_cmd}'"),
-                        Some(common_cmd.to_string()),
-                    );
+                    let reason = format!("Rare variant of '{common_cmd}'");
                     for &idx in indices {
-                        removals.entry(idx).or_insert_with(|| entry.clone());
+                        removals.entry(idx).or_insert_with(|| reason.clone());
                     }
                 }
                 break;
@@ -236,6 +220,32 @@ mod tests {
         let h = parse_with_exits(": 1:0;ls -la\n: 2:0;git status\n", &[("1", 1), ("2", 0)]);
         let removals = identify_removals(&h, &CleaningSettings::default());
         assert!(removals.is_empty());
+    }
+
+    #[test]
+    fn feature_branch_not_flagged_as_typo() {
+        let h = parse_with_exits(
+            ": 1:0;git push origin feature-1\n: 2:0;git push origin feature-2\n: 3:0;git push origin feature-2\n",
+            &[("1", 1), ("2", 0), ("3", 0)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default());
+        let flagged = removals
+            .iter()
+            .any(|r| r.line == 0 && r.reason.contains("Failed similar"));
+        assert!(!flagged);
+    }
+
+    #[test]
+    fn git_statsu_still_flagged() {
+        let h = parse_with_exits(
+            ": 1:0;git statsu\n: 2:0;git status\n: 3:0;git status\n",
+            &[("1", 1), ("2", 0), ("3", 0)],
+        );
+        let removals = identify_removals(&h, &CleaningSettings::default());
+        let hit = removals
+            .iter()
+            .any(|r| r.line == 0 && r.reason.contains("Failed similar"));
+        assert!(hit);
     }
 
     #[test]
