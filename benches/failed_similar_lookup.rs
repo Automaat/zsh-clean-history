@@ -40,10 +40,8 @@ fn bench_large_bucket_few_matches(c: &mut Criterion) {
     let success_cmds: Vec<(String, usize)> = (0..500)
         .map(|i| (format!("git subcommand-variant-{i:04}"), 3usize))
         .collect();
-    let success_refs: Vec<(&str, usize)> = success_cmds
-        .iter()
-        .map(|(s, n)| (s.as_str(), *n))
-        .collect();
+    let success_refs: Vec<(&str, usize)> =
+        success_cmds.iter().map(|(s, n)| (s.as_str(), *n)).collect();
 
     // Typos that are within edit distance of specific subcommands
     let failed: Vec<(&str, usize)> = vec![
@@ -71,19 +69,15 @@ fn bench_large_bucket_many_matches(c: &mut Criterion) {
     let success_cmds: Vec<(String, usize)> = (0..200)
         .map(|i| (format!("git command-{i:03}"), 5usize))
         .collect();
-    let success_refs: Vec<(&str, usize)> = success_cmds
-        .iter()
-        .map(|(s, n)| (s.as_str(), *n))
-        .collect();
+    let success_refs: Vec<(&str, usize)> =
+        success_cmds.iter().map(|(s, n)| (s.as_str(), *n)).collect();
 
     // Typos: one transposition away from matching commands
     let failed_cmds: Vec<(String, usize)> = (0..100)
         .map(|i| (format!("git command-{i:03x}"), 1usize)) // hex suffix → near-miss
         .collect();
-    let failed_refs: Vec<(&str, usize)> = failed_cmds
-        .iter()
-        .map(|(s, n)| (s.as_str(), *n))
-        .collect();
+    let failed_refs: Vec<(&str, usize)> =
+        failed_cmds.iter().map(|(s, n)| (s.as_str(), *n)).collect();
 
     let (text, exits) = gen_corpus(&success_refs, &failed_refs);
     let settings = CleaningSettings::default();
@@ -103,13 +97,56 @@ fn bench_large_bucket_many_matches(c: &mut Criterion) {
 /// - 200 failed typos spread across bases
 fn bench_100k(c: &mut Criterion) {
     let bases = [
-        "git", "cargo", "docker", "kubectl", "npm", "yarn", "pip", "go",
-        "make", "cmake", "mvn", "gradle", "terraform", "ansible", "helm",
-        "aws", "gcloud", "az", "kubectl", "systemctl", "journalctl", "apt",
-        "yum", "dnf", "brew", "port", "nix", "guix", "pacman", "zypper",
-        "flatpak", "snap", "appimage", "conda", "mamba", "poetry", "uv",
-        "rustup", "rbenv", "pyenv", "nvm", "asdf", "mise", "direnv",
-        "tmux", "screen", "ssh", "scp", "rsync", "curl",
+        "git",
+        "cargo",
+        "docker",
+        "kubectl",
+        "npm",
+        "yarn",
+        "pip",
+        "go",
+        "make",
+        "cmake",
+        "mvn",
+        "gradle",
+        "terraform",
+        "ansible",
+        "helm",
+        "aws",
+        "gcloud",
+        "az",
+        "kubectl",
+        "systemctl",
+        "journalctl",
+        "apt",
+        "yum",
+        "dnf",
+        "brew",
+        "port",
+        "nix",
+        "guix",
+        "pacman",
+        "zypper",
+        "flatpak",
+        "snap",
+        "appimage",
+        "conda",
+        "mamba",
+        "poetry",
+        "uv",
+        "rustup",
+        "rbenv",
+        "pyenv",
+        "nvm",
+        "asdf",
+        "mise",
+        "direnv",
+        "tmux",
+        "screen",
+        "ssh",
+        "scp",
+        "rsync",
+        "curl",
     ];
 
     let mut success_cmds: Vec<(String, usize)> = Vec::new();
@@ -119,10 +156,8 @@ fn bench_100k(c: &mut Criterion) {
             success_cmds.push((cmd, 50));
         }
     }
-    let success_refs: Vec<(&str, usize)> = success_cmds
-        .iter()
-        .map(|(s, n)| (s.as_str(), *n))
-        .collect();
+    let success_refs: Vec<(&str, usize)> =
+        success_cmds.iter().map(|(s, n)| (s.as_str(), *n)).collect();
 
     // 200 failed typos: one transposition in the subcommand name
     let failed_cmds: Vec<(String, usize)> = (0..200)
@@ -134,10 +169,8 @@ fn bench_100k(c: &mut Criterion) {
             (cmd, 1usize)
         })
         .collect();
-    let failed_refs: Vec<(&str, usize)> = failed_cmds
-        .iter()
-        .map(|(s, n)| (s.as_str(), *n))
-        .collect();
+    let failed_refs: Vec<(&str, usize)> =
+        failed_cmds.iter().map(|(s, n)| (s.as_str(), *n)).collect();
 
     let (text, exits) = gen_corpus(&success_refs, &failed_refs);
     let line_count = text.lines().count();
