@@ -34,6 +34,14 @@ typeset -g _zsh_clean_history_pending_ts=0
 typeset -gi _zsh_clean_history_pending_histcmd=0
 typeset -gi _zsh_clean_history_recorded_histcmd=0
 
+# Ensure exit file exists with 0600 permissions.  Run in a subshell so the
+# umask change does not affect the calling shell.
+if [[ ! -f "$_zsh_clean_history_exit_file" ]]; then
+    (umask 0177 && : >>! "$_zsh_clean_history_exit_file") 2>/dev/null
+else
+    chmod 0600 "$_zsh_clean_history_exit_file" 2>/dev/null
+fi
+
 # preexec captures EPOCHREALTIME at command start, which matches the timestamp
 # zsh writes into HISTFILE for EXTENDED_HISTORY entries. Without this, long-
 # running commands (e.g. `sleep 60`) would record an end-time timestamp that

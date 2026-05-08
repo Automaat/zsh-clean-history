@@ -3,31 +3,50 @@
 ## Project Context
 
 **Stack:**
-- Language: Python 3.11+
+- Language: Rust (edition 2024, MSRV 1.85)
 - Shell: zsh
-- Build/Dev: mise
-- Testing: pytest
-- Linting: ruff (800+ rules), shellcheck
+- Build/Dev: mise, Cargo
+- Testing: cargo test, proptest (property-based), criterion (benchmarks), assert_cmd (CLI integration)
+- Linting: cargo clippy (`-D warnings`), cargo fmt
 
 **Purpose:**
-Smart zsh history cleanup plugin - removes typos and failed commands via similarity analysis
+Smart zsh history cleanup plugin — removes typos and failed commands via similarity analysis
 
 **Core Modules:**
-- `clean_history.py`: Core cleanup logic (similarity detection, history parsing, exit code tracking)
-- `test_clean_history.py`: Comprehensive unit tests
-- `zsh-clean-history.plugin.zsh`: Plugin integration (exit tracking, zsh functions)
+- `src/similarity.rs`: Damerau-Levenshtein distance, BK-tree indexing, token normalization
+- `src/cleaner.rs`: Removal strategies (dedup, failed-similar-to-successful, cross-base typos, rare variants)
+- `src/clean.rs`: Cleanup orchestration — file locking, backup, atomic write, exit code compaction
+- `src/history.rs`: zsh history format parser (multi-line, timestamps, exit codes)
+- `src/exits.rs`: Exit code file parsing and compaction
+- `src/secrets.rs`: Secret pattern detection and redaction
+- `src/log.rs`: JSONL logging with rotation and redaction
+- `src/allowlist.rs`: User-whitelist regex filtering
+- `src/paths.rs`: File path construction
+- `src/settings.rs`: Configuration struct
+- `src/cli_definition.rs`: Shared CLI definition — `Cli` struct and `Cmd` enum included by both `src/main.rs` and `build.rs` via `include!()`; defines all flags (`--similarity`, `--rare-threshold`, `--dry-run`, `--verbose`, `--quiet`, `--remove-rare`, `--no-log`, `--log-max-bytes`) and subcommands (`Undo`, `RecordExit`, `Explain`)
+- `src/main.rs`: CLI entry point — includes `cli_definition.rs`, wires up `clap`, dispatches subcommands
+- `tests/cli.rs`: End-to-end CLI tests
+- `benches/failed_similar_lookup.rs`: Criterion benchmarks
+
+**Key Dependencies:**
+- Error handling: `anyhow` (contextual propagation with `.with_context()`)
+- Similarity: `strsim` (Damerau-Levenshtein), `bk-tree` (metric space indexing)
+- CLI: `clap` (derive), `clap_complete`, `clap_mangen`
+- File ops: `tempfile` (atomic writes), `fs2` (file locking)
+- Testing: `proptest`, `assert_cmd`, `predicates`, `criterion`
 
 **Conventions:**
-- Error Handling: Context managers for file ops, explicit error suppression with `contextlib.suppress` only for expected errors
-- Type Hints: All public functions must have type hints (Python 3.11+ syntax with `|` for unions)
-- Testing: pytest, all new features require tests
-- Formatting: Ruff auto-format (double quotes, 100 char line length)
+- Error handling: `anyhow::Result<T>` with `.with_context(|| "...")`; no bare `.unwrap()` in library code
+- Memory safety: no `unsafe` without a doc comment explaining why it is sound
+- Testing: unit tests inline (`#[cfg(test)]`), property tests in `props` submodule, CLI tests in `tests/`
+- Formatting: `cargo fmt` (default config, no `rustfmt.toml`)
 
 **Critical Areas (Extra Scrutiny):**
 - History file manipulation (data loss risk)
 - Backup creation/restoration
 - Exit code tracking (must be accurate)
-- Command parsing (handles special chars, multiline)
+- Command parsing (handles special chars, multiline, quoted args)
+- Secret detection/redaction (log output must never leak secrets)
 
 ---
 
@@ -36,11 +55,12 @@ Smart zsh history cleanup plugin - removes typos and failed commands via similar
 You review PRs immediately, before CI finishes. Do NOT flag issues that CI will catch.
 
 **CI Already Checks:**
-- Code formatting (ruff format)
-- Linting (800+ ruff rules - see pyproject.toml)
-- Type checking (no separate type checker, ruff handles)
-- Shell linting (shellcheck for .zsh files)
-- Test execution (pytest)
+- Formatting (`cargo fmt --check`)
+- Linting (`cargo clippy --all-targets -- -D warnings`)
+- Tests (`cargo test --all-targets`)
+- Benchmark compile (`cargo bench --no-run`)
+- Shell syntax (`zsh -n` on `.zsh` files, Linux only)
+- Workflow linting (`actionlint`)
 
 ---
 
@@ -50,61 +70,76 @@ You review PRs immediately, before CI finishes. Do NOT flag issues that CI will 
 
 **Data Integrity** (95%+ confidence)
 - [ ] History file backup before modification
-- [ ] Atomic file operations (write to temp, move)
-- [ ] No data loss on error/crash
+- [ ] Atomic file operations (`tempfile::NamedTempFile` → `persist`/`rename`, never direct write)
+- [ ] `sync_all()` called before rename
+- [ ] File lock acquired before any history read/write
+- [ ] No data loss on error or SIGKILL
 - [ ] Exit code file corruption prevention
-- [ ] Proper file encoding (utf-8 with errors='ignore')
 
 **Correctness Issues** (90%+ confidence)
-- [ ] Command parsing handles edge cases (multiline, special chars, empty lines)
-- [ ] Similarity algorithm logic errors
-- [ ] Off-by-one errors in line removal
-- [ ] Dict/set operations preserve correct indices
+- [ ] Command parsing handles edge cases (multiline escapes, quoted args, empty lines)
+- [ ] Similarity algorithm logic errors (edit distance, BK-tree radius)
+- [ ] Off-by-one errors in line removal or index slicing
 - [ ] Timestamp matching between history and exit codes
+- [ ] BK-tree distance metric must be a proper metric (symmetry, triangle inequality)
+
+**Memory Safety** (90%+ confidence)
+- [ ] No `unsafe` block without soundness justification in doc comment
+- [ ] No integer overflow in index arithmetic (use checked ops or assert bounds)
 
 ### 🟡 HIGH (Request Changes)
 
 **Maintainability** (80%+ confidence)
 - [ ] New features have unit tests
-- [ ] Functions have type hints
-- [ ] Complex logic has inline comments
-- [ ] Edge cases tested (empty history, missing exit file, corrupt data)
-- [ ] Error messages helpful for users
+- [ ] Property-based tests for parsing/algorithmic code (use `proptest`)
+- [ ] Complex logic has inline comments explaining the invariant, not the mechanics
+- [ ] Edge cases tested (empty history, missing exit file, corrupt data, 100k+ lines)
+- [ ] Error messages actionable for users
 
 **Testing** (85%+ confidence)
 - [ ] Test coverage for new code paths
-- [ ] Tests use proper fixtures (tmp_path, monkeypatch)
-- [ ] Tests independent (no shared state)
-- [ ] Tests check both success and failure cases
+- [ ] Unit tests use `tempfile::tempdir()` for isolation; no writes to `$HOME`
+- [ ] Tests are independent (no shared mutable state)
+- [ ] Both success and failure paths covered
+- [ ] CLI tests use `assert_cmd::Command` against the compiled binary
+
+**Error Handling** (85%+ confidence)
+- [ ] No `.unwrap()` or `.expect()` in library code paths that run on user data
+- [ ] `anyhow` context added at call sites: `.with_context(|| format!("reading {}", path.display()))`
+- [ ] Errors propagated with `?`; no silent discard
+- [ ] File I/O errors include the offending path in the message
 
 **CLI/UX** (75%+ confidence)
 - [ ] Help text clear and accurate
-- [ ] Dry-run mode works correctly
+- [ ] Dry-run mode correct
 - [ ] Stats output helpful
 - [ ] Quiet mode suppresses appropriate output
+- [ ] `--verbose` / `--quiet` flags behave consistently across all subcommands
+- [ ] `--no-log` disables JSONL log writes; `--log-max-bytes` rotation threshold respected
+- [ ] `Explain` subcommand output is human-readable and covers all removal reasons
+- [ ] Shell completions and man page stay in sync with `src/cli_definition.rs` (regenerated via `build.rs`)
 
 ### 🟢 MEDIUM (Suggest/Comment)
 
 **Performance** (70%+ confidence)
-- [ ] Large history file handling (10k+ lines)
-- [ ] Unnecessary list copies avoided
-- [ ] Dict lookups preferred over linear scans
-- [ ] File reading efficient (not reading twice)
+- [ ] Large history handling (10k+ lines); BK-tree used for similarity lookups (not O(n²) scan)
+- [ ] Unnecessary `clone()` on large strings avoided (prefer `Arc<str>` or borrowing)
+- [ ] `OnceLock`/`LazyLock` for regex patterns compiled once per process
+- [ ] Allocations in hot loops minimized
 
 **Code Quality** (65%+ confidence)
-- [ ] Functions under 50 lines (ruff max-statements)
-- [ ] Cyclomatic complexity ≤10 (ruff mccabe)
-- [ ] Function args ≤5 (ruff max-args)
-- [ ] Dataclasses for structured data
+- [ ] Types encode invariants where possible (newtype wrappers, enums over stringly-typed flags)
+- [ ] Iterator chains preferred over manual index loops
+- [ ] `match` exhaustive; no wildcard `_` arms that silently ignore variants
+- [ ] Functions focused: parsing separated from logic, I/O from computation
 
 ### ⚪ LOW (Optional/Skip)
 
 Don't comment on:
-- Formatting (ruff format handles)
-- Import order (ruff isort handles)
-- Docstring style (Google convention enforced)
-- Line length (100 chars enforced)
-- Quote style (double quotes enforced)
+- Formatting (`cargo fmt` handles)
+- Import order (`rustfmt` handles)
+- Clippy warnings (CI blocks on `-D warnings`)
+- Naming style (`rustfmt`/clippy enforces snake_case, CamelCase, SCREAMING_SNAKE_CASE)
 
 ---
 
@@ -112,109 +147,120 @@ Don't comment on:
 
 ### File Operations
 - [ ] Backup created BEFORE modification
-- [ ] Temp files in secure location
-- [ ] File permissions preserved
-- [ ] Symlinks handled safely (or rejected)
-- [ ] Path traversal prevented (use Path, no string concat)
+- [ ] Atomic write: `NamedTempFile` in same directory as target (same filesystem → rename is atomic)
+- [ ] File permissions preserved (history: 0o600, log: 0o600)
+- [ ] Symlinks handled safely or rejected
+- [ ] No TOCTOU: acquire lock, then stat; don't stat-then-open
+- [ ] Path traversal prevented (use `Path`/`PathBuf`, not string concatenation)
 
 ### Input Validation
-- [ ] Command-line args validated (argparse handles types)
-- [ ] Similarity threshold in valid range (0.0-1.0)
+- [ ] CLI args validated via `clap` type annotations and validators
+- [ ] Similarity threshold in valid range (0.0–1.0)
 - [ ] Rare threshold positive integer
-- [ ] File paths validated (exist, readable, writable)
+- [ ] File paths validated (exist, readable, writable) before locking
 
 ### Data Protection
-- [ ] No secrets in history file logged/printed
-- [ ] Exit code file not world-readable
+- [ ] Secrets never written to log (redaction applied before serialisation)
+- [ ] Exit code file not world-readable (0o600)
 - [ ] Backup files same permissions as original
+- [ ] Log rotation replaces old file atomically
 
 ---
 
 ## Code Quality Standards
 
 ### Naming
-- Functions/Variables: `snake_case`
-- Classes: `PascalCase`
-- Constants: `UPPER_SNAKE_CASE`
-- Meaningful names (intent clear without comments)
-
-### Type Hints (Python 3.11+)
-- All public functions: full type hints
-- Use `|` for unions: `str | None` not `Optional[str]`
-- Use `list[str]` not `List[str]` (no typing imports needed)
-- Collections from stdlib: `dict`, `set`, `list`, `tuple`
+- Functions/variables/modules: `snake_case`
+- Types/traits: `PascalCase`
+- Constants/statics: `SCREAMING_SNAKE_CASE`
+- Names express intent; avoid `tmp`, `data`, `info` as sole identifiers
 
 ### Error Handling
-- Context managers for files: `with open(...) as f:`
-- Explicit error suppression: `with contextlib.suppress(ValueError):`
-- Never bare `except:`
-- Specific exceptions: `FileNotFoundError`, `ValueError`, etc.
-- User-facing errors: clear messages, suggest fixes
+- Library code: `anyhow::Result<T>`, propagate with `?`
+- Add context at I/O boundaries: `.with_context(|| ...)`
+- No `.unwrap()` on user-supplied data; `.expect("invariant: ...")` only for logic-proven-safe paths
+- No `panic!` in library code; return `Err` instead
+- Match on specific error kinds when recovery differs (e.g., `io::ErrorKind::NotFound` vs. `PermissionDenied`)
 
 ### Testing Requirements
-- **Coverage:** All new functions tested
+- **Coverage:** All new public functions tested
 - **Required tests:**
   - [ ] New features have unit tests
   - [ ] Bug fixes include regression test
-  - [ ] Edge cases covered (empty, corrupt, large files)
-  - [ ] Error conditions tested
+  - [ ] Edge cases: empty input, corrupt data, Unicode, 100k+ entries
+  - [ ] Error conditions: missing file, permission denied, corrupt exit-code file
 - **Test quality:**
-  - Use fixtures: `tmp_path`, `monkeypatch`
-  - Isolated (no shared state)
-  - Fast (no sleep, mock file I/O if needed)
-  - Descriptive names: `test_parse_history_line_with_multiline_command`
+  - Isolated: use `tempfile::tempdir()`, never touch real `$HOME`
+  - Fast: no `sleep`, no network
+  - Descriptive: `test_parse_history_line_with_multiline_command`
+  - Property tests in `mod props` using `proptest! {}` macro
 
 ### Documentation
-- [ ] Public functions have docstrings (Google style)
-- [ ] Complex algorithms explained (similarity logic, duplicate removal)
-- [ ] Non-obvious decisions have comments
-- [ ] README updated if behavior changes
+- [ ] Public functions have a doc comment (`///`) when the signature alone doesn't convey intent
+- [ ] Complex algorithms explained (similarity scoring, BK-tree radius selection, time-decay weighting)
+- [ ] Non-obvious decisions have `// SAFETY:` or `// INVARIANT:` comments
+- [ ] README updated if observable behavior changes
 - [ ] CONTRIBUTING.md updated if dev workflow changes
 
 ---
 
-## Python-Specific Guidelines
+## Rust-Specific Guidelines
 
-### Modern Python (3.11+)
-- Use `|` for unions: `str | None`
-- Use `from __future__ import annotations` for forward refs
-- Dataclasses for structured data
-- Context managers for resources
-- Use `Path` not string paths
+### Ownership & Borrowing
+- Prefer borrowing (`&str`, `&[T]`) over cloning in function signatures
+- Use `Arc<str>` when cheap cloning across threads is needed (removal reasons)
+- Avoid `Rc` in code that may become multi-threaded
 
-### Standard Library Preferred
-- `difflib.SequenceMatcher` for similarity (already used)
-- `collections.Counter` for counting
-- `contextlib.suppress` for expected errors
-- `pathlib.Path` for file operations
-- `re` for parsing (already used)
+### Error Handling Patterns
+```rust
+// ✅ Context at I/O boundary
+fn load_exits(path: &Path) -> anyhow::Result<ExitMap> {
+    let data = fs::read_to_string(path)
+        .with_context(|| format!("reading exit codes from {}", path.display()))?;
+    parse_exits(&data).with_context(|| "parsing exit codes")
+}
 
-### Type Safety
-- Type hints on all public functions
-- Avoid `Any` (project doesn't use it)
-- Use specific collection types: `dict[str, int]` not `dict`
+// ❌ Silent discard
+fn load_exits(path: &Path) -> Option<ExitMap> {
+    fs::read_to_string(path).ok().and_then(|d| parse_exits(&d).ok())
+}
+```
 
-### Ruff Compliance
-- Project uses 800+ ruff rules (see pyproject.toml)
-- Some disabled for good reason:
-  - `T201`: Allow print (CLI tool)
-  - `D100-D107`: Docstrings on public funcs only
-  - `ANN401`: No `Any` allowed
-- Test files have relaxed rules (S101 allow assert, no docstrings)
+### Unsafe
+- Every `unsafe` block needs a `// SAFETY:` comment explaining why the invariants hold
+- Prefer safe abstractions (`slice::get`, checked arithmetic) over `unsafe` for performance
+- Flag any new `unsafe` without a safety comment as CRITICAL
+
+### Modern Rust (Edition 2024)
+- Use `impl Trait` in return position for simple cases
+- `let-else` for early-exit pattern matching
+- `?` in `main` (already returns `anyhow::Result`)
+- `OnceLock`/`LazyLock` from `std::sync` for lazy statics; no external `lazy_static`
+
+### Cargo & Dependencies
+- New dependency needs justification (functionality + why existing deps don't cover it)
+- Prefer `std` over micro-crates for trivial utilities
+- Pin MSRV in `Cargo.toml`; new deps must not raise MSRV without explicit decision
+- Dev-only deps in `[dev-dependencies]`
+
+### Clippy Compliance
+- CI runs `cargo clippy --all-targets -- -D warnings`; all new code must be lint-clean
+- Do not `#[allow(clippy::...)]` without a comment explaining why the lint is wrong here
+- Common lint families to watch: `clippy::pedantic` patterns (even if not enforced), `clippy::correctness` (always blocked)
 
 ---
 
 ## Shell Script Guidelines (zsh)
 
 ### zsh-clean-history.plugin.zsh
-- [ ] Shellcheck clean
+- [ ] `zsh -n` syntax-clean
 - [ ] Functions use `local` for variables
-- [ ] Exit code tracking accurate (`$?` captured immediately)
+- [ ] Exit code tracking accurate (`$?` captured immediately after command)
 - [ ] Plugin load/unload safe (no side effects if loaded twice)
 - [ ] Environment vars documented
 
 ### Common Issues
-- **Exit code:** Must capture `$?` IMMEDIATELY after command
+- **Exit code:** Must capture `$?` immediately after command; any intervening command overwrites it
 - **Quoting:** Variables in double quotes: `"$variable"`
 - **Arrays:** Use `()` for array literals
 - **Conditionals:** `[[ ]]` not `[ ]`
@@ -224,97 +270,112 @@ Don't comment on:
 ## Architecture Patterns
 
 **Follow these patterns:**
-- Dataclasses for structured data (`CleaningSettings`, `CommandData`)
-- Pure functions where possible (no side effects)
-- Separate parsing from logic (parse_history_line, load_exit_codes)
-- CLI parsing in main, logic in functions
+- Structs for structured data (`Settings`, `HistoryEntry`, `ExitMap`)
+- Pure functions for parsing and algorithms (no I/O side effects)
+- Separate parsing from logic (`parse_history_line`, `load_exit_codes`)
+- I/O at the edges: `clean.rs` orchestrates; `cleaner.rs` is pure logic
+- `OnceLock` for compiled regexes — compile once, reuse across calls
 
 **Avoid these anti-patterns:**
-- Global state (use function params)
-- Monolithic functions (keep under 50 lines)
-- Nested conditionals (early returns preferred)
-- String parsing with splits (use regex for complex formats)
+- Global mutable state (`static mut`); use `OnceLock` or pass state explicitly
+- Monolithic functions; keep under ~50 lines
+- Nested match arms 3+ deep; flatten with `let-else` or helper functions
+- String parsing with manual splits when a regex or proper parser is cleaner
+- `.clone()` on large `Vec`/`String` inside hot loops
 
 ---
 
 ## Review Examples
 
-### ✅ Good: Safe File Operation
-```python
-# Backup before modification
-backup_path = history_file.with_suffix(BACKUP_SUFFIX)
-shutil.copy2(history_file, backup_path)
+### ✅ Good: Atomic File Operation
+```rust
+// backup first
+let backup = history_path.with_extension("bak");
+fs::copy(&history_path, &backup)
+    .with_context(|| format!("creating backup at {}", backup.display()))?;
 
-# Write to temp, then atomic move
-tmp_path = history_file.with_suffix('.tmp')
-with tmp_path.open('w', encoding='utf-8') as f:
-    f.writelines(lines_to_keep)
-tmp_path.replace(history_file)
+// write to temp in same directory, then rename (atomic on same fs)
+let mut tmp = NamedTempFile::new_in(history_path.parent().unwrap())?;
+for line in &lines_to_keep {
+    writeln!(tmp, "{}", line)?;
+}
+tmp.as_file().sync_all()?;
+tmp.persist(&history_path)
+    .with_context(|| "persisting history file")?;
 ```
 
-### ❌ Bad: No Backup
-```python
-# Direct write - data loss risk if crash
-with history_file.open('w', encoding='utf-8') as f:
-    f.writelines(lines_to_keep)
-```
-
----
-
-### ✅ Good: Type Hints (Python 3.11+)
-```python
-def parse_history_line(line: str) -> tuple[str | None, str | None]:
-    """Parse a zsh history line."""
-    match = re.match(r": (\d+):\d+;(.+)", line)
-    if not match:
-        return None, None
-    return match.groups()
-```
-
-### ❌ Bad: No Type Hints
-```python
-def parse_history_line(line):
-    match = re.match(r": (\d+):\d+;(.+)", line)
-    if not match:
-        return None, None
-    return match.groups()
+### ❌ Bad: Direct Write (No Backup, Not Atomic)
+```rust
+// data loss if process crashes mid-write
+let mut f = File::create(&history_path)?;
+for line in &lines_to_keep {
+    writeln!(f, "{}", line)?;
+}
 ```
 
 ---
 
-### ✅ Good: Explicit Error Suppression
-```python
-with contextlib.suppress(ValueError):
-    exit_codes[timestamp] = int(exit_code)
+### ✅ Good: Error With Context
+```rust
+let content = fs::read_to_string(&exits_path)
+    .with_context(|| format!("reading {}", exits_path.display()))?;
 ```
 
-### ❌ Bad: Bare Except
-```python
-try:
-    exit_codes[timestamp] = int(exit_code)
-except:  # Too broad, hides bugs
-    pass
+### ❌ Bad: Unwrap on User Data
+```rust
+let content = fs::read_to_string(&exits_path).unwrap();
 ```
 
 ---
 
-### ✅ Good: Test with Fixtures
-```python
-def test_clean_history_creates_backup(tmp_path: Path) -> None:
-    history = tmp_path / ".zsh_history"
-    history.write_text(": 1234:0;echo test\n")
-
-    clean_history(history, similarity=0.8)
-
-    assert (tmp_path / ".zsh_history.backup").exists()
+### ✅ Good: Unsafe With Safety Justification
+```rust
+// SAFETY: index is bounds-checked by the caller; len > 0 asserted above
+let first = unsafe { slice.get_unchecked(0) };
 ```
 
-### ❌ Bad: No Isolation
-```python
-def test_clean_history_creates_backup():
-    # Uses real home directory - dangerous!
-    clean_history(Path.home() / ".zsh_history", similarity=0.8)
-    assert Path.home() / ".zsh_history.backup".exists()
+### ❌ Bad: Unsafe Without Justification
+```rust
+let first = unsafe { slice.get_unchecked(0) };
+```
+
+---
+
+### ✅ Good: Property-Based Test
+```rust
+proptest! {
+    #[test]
+    fn parse_never_panics(s in ".*") {
+        let _ = parse_history_line(&s);
+    }
+}
+```
+
+### ❌ Bad: Only Happy-Path Test
+```rust
+#[test]
+fn test_parse_history_line() {
+    assert_eq!(parse_history_line(": 1234:0;echo hi"), Some(("1234", "echo hi")));
+}
+```
+
+---
+
+### ✅ Good: CLI Integration Test
+```rust
+#[test]
+fn cleanup_creates_backup() {
+    let dir = tempdir().unwrap();
+    let history = dir.path().join(".zsh_history");
+    fs::write(&history, ": 1234:0;echo test\n").unwrap();
+
+    Command::cargo_bin("zsh-clean-history").unwrap()
+        .args(["cleanup", "--history", history.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert!(dir.path().join(".zsh_history.bak").exists());
+}
 ```
 
 ---
@@ -324,13 +385,14 @@ def test_clean_history_creates_backup():
 **What matters most:**
 1. **Data integrity:** Cannot lose user's history under any circumstance
 2. **Correctness:** Similarity algorithm must work as documented
-3. **Testing:** All edge cases covered (corrupt files, empty history, etc.)
+3. **Testing:** All edge cases covered (corrupt files, empty history, large input)
 4. **UX:** Clear output, helpful errors, safe defaults
 
 **Trade-offs we accept:**
-- Code verbosity for safety (explicit backups, error handling)
-- Some performance for correctness (re-read file if needed)
+- Verbose error handling for safety (explicit context chains)
+- Some allocation for correctness (re-read file if lock was lost)
 - Conservative defaults (0.8 similarity, 3 rare threshold)
+- BK-tree memory overhead for O(log n) similarity search
 
 ---
 
@@ -339,8 +401,8 @@ def test_clean_history_creates_backup():
 Only flag issues you're **80% or more confident** about.
 
 If uncertain:
-- Phrase as question: "Could this lose data if process crashes?"
-- Suggest investigation: "Consider testing with 100k line history"
+- Phrase as question: "Could this lose data if the process is killed mid-write?"
+- Suggest investigation: "Consider testing with a 100k-line history file"
 - Don't block PR on speculation
 
 ---
@@ -348,25 +410,24 @@ If uncertain:
 ## Review Tone
 
 - **Constructive:** Explain WHY, not just WHAT
-- **Specific:** Point to exact file:line
+- **Specific:** Point to exact `file:line`
 - **Actionable:** Suggest fix or alternative
-- **Educational:** This is OSS learning opportunity
+- **Educational:** This is OSS; a learning opportunity
 
 **Example:**
 ❌ "This is unsafe"
-✅ "In clean_history.py:142, writing directly to history file without backup. If process crashes mid-write, user loses history. Create backup first with `shutil.copy2(history, backup_path)` before opening for write."
+✅ "In `clean.rs:142`, writing directly to the history file without a temp file. If the process is killed mid-write the file will be truncated and the user loses history. Use `NamedTempFile::new_in(parent)` + `persist()` instead, and call `sync_all()` before `persist()`."
 
 ---
 
 ## Out of Scope
 
 Do NOT review:
-- [ ] Code formatting (ruff format handles)
-- [ ] Import ordering (ruff isort handles)
-- [ ] Lint warnings (ruff check handles with 800+ rules)
-- [ ] Docstring format (Google convention enforced)
+- [ ] Formatting (`cargo fmt` handles)
+- [ ] Import order (`rustfmt` handles)
+- [ ] Clippy lints (`cargo clippy -D warnings` blocks CI)
+- [ ] Naming style (enforced by compiler + clippy)
 - [ ] Personal style preferences
-- [ ] Shell formatting (shellcheck handles)
 
 ---
 
@@ -374,32 +435,35 @@ Do NOT review:
 
 **When PR is:**
 - **Hotfix:** Focus only on data integrity + correctness
-- **Refactor:** Ensure tests still pass, behavior unchanged
+- **Refactor:** Ensure tests still pass, behavior unchanged, no new `.unwrap()` introduced
 - **New feature:** Require tests, update README
 - **Bug fix:** Require regression test
 - **Shell script change:** Verify exit code tracking still works
+- **New dependency:** Require justification; check MSRV impact
 
 ---
 
 ## Checklist Summary
 
 Before approving PR, verify:
-- [ ] No data loss risk (backup before modify)
-- [ ] Tests exist and cover new code
-- [ ] Type hints on public functions
-- [ ] Edge cases handled (empty, corrupt, large files)
-- [ ] Error messages helpful
+- [ ] No data loss risk (backup before modify, atomic write, `sync_all` before rename)
+- [ ] Tests exist and cover new code (unit + edge cases)
+- [ ] No `.unwrap()` on user-supplied data
+- [ ] No `unsafe` without `// SAFETY:` comment
+- [ ] New deps justified and MSRV-compatible
+- [ ] Error messages include path/context for actionable debugging
 - [ ] README updated if behavior changes
 - [ ] Shell changes don't break exit code tracking
-- [ ] No bare except or broad error suppression
 
 ---
 
 ## Additional Context
 
 **See also:**
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Dev setup, testing, PR guidelines
-- [README.md](../README.md) - Usage, configuration, how it works
-- [pyproject.toml](../pyproject.toml) - Ruff configuration (800+ rules)
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — Dev setup, testing, PR guidelines
+- [README.md](../README.md) — Usage, configuration, how it works
+- [Cargo.toml](../Cargo.toml) — Dependencies and build profiles
+
+**Reference style:** [dtolnay/case-studies](https://github.com/dtolnay/case-studies/) — idiomatic Rust patterns, API design, error handling
 
 **For questions:** Open issue before major architectural changes
