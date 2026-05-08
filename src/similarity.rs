@@ -235,7 +235,11 @@ mod tests {
 
     #[test]
     fn sha_args_not_similar() {
-        assert!(!command_similar("git checkout abc123", "git checkout def456", 0.8));
+        assert!(!command_similar(
+            "git checkout abc123",
+            "git checkout def456",
+            0.8
+        ));
     }
 
     #[test]
@@ -268,10 +272,7 @@ mod tests {
 
     #[test]
     fn normalize_double_quoted_url_replaced() {
-        assert_eq!(
-            normalize(r#"curl "https://api.example.com""#),
-            "curl <URL>"
-        );
+        assert_eq!(normalize(r#"curl "https://api.example.com""#), "curl <URL>");
     }
 
     #[test]
