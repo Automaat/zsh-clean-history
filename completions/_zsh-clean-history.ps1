@@ -25,6 +25,8 @@ Register-ArgumentCompleter -Native -CommandName 'zsh-clean-history' -ScriptBlock
             [CompletionResult]::new('--rare-threshold', '--rare-threshold', [CompletionResultType]::ParameterName, 'rare-threshold')
             [CompletionResult]::new('--log-max-bytes', '--log-max-bytes', [CompletionResultType]::ParameterName, 'log-max-bytes')
             [CompletionResult]::new('--dry-run', '--dry-run', [CompletionResultType]::ParameterName, 'dry-run')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
             [CompletionResult]::new('-q', '-q', [CompletionResultType]::ParameterName, 'q')
             [CompletionResult]::new('--quiet', '--quiet', [CompletionResultType]::ParameterName, 'quiet')
             [CompletionResult]::new('--remove-rare', '--remove-rare', [CompletionResultType]::ParameterName, 'remove-rare')

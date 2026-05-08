@@ -118,3 +118,20 @@ fn compaction_runs_even_when_no_removals() {
     assert!(!exits_after.contains("9999"));
     assert!(!exits_after.contains("8888"));
 }
+
+#[test]
+fn dry_run_verbose_shows_sample_removals() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    fs::write(
+        home.join(".zsh_history"),
+        ": 1:0;git statsu\n: 2:0;git status\n: 3:0;git status\n",
+    )
+    .unwrap();
+    fs::write(home.join(".zsh_history_exits"), "1:1\n2:0\n3:0\n").unwrap();
+
+    run(home, &["--dry-run", "--verbose"])
+        .success()
+        .stdout(predicates::str::contains("Failed similar to 'git status'"))
+        .stdout(predicates::str::contains("git statsu"));
+}

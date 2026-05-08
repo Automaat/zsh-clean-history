@@ -47,7 +47,7 @@ _zsh-clean-history() {
 
     case "${cmd}" in
         zsh__clean__history)
-            opts="-q -h -V --similarity --rare-threshold --dry-run --quiet --remove-rare --no-log --log-max-bytes --help --version undo record-exit explain help"
+            opts="-v -q -h -V --similarity --rare-threshold --dry-run --verbose --quiet --remove-rare --no-log --log-max-bytes --help --version undo record-exit explain help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0

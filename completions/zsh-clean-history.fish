@@ -1,6 +1,6 @@
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_zsh_clean_history_global_optspecs
-	string join \n similarity= rare-threshold= dry-run q/quiet remove-rare no-log log-max-bytes= h/help V/version
+	string join \n similarity= rare-threshold= dry-run v/verbose q/quiet remove-rare no-log log-max-bytes= h/help V/version
 end
 
 function __fish_zsh_clean_history_needs_command
@@ -28,6 +28,7 @@ complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -l sim
 complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -l rare-threshold -r
 complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -l log-max-bytes -r
 complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -l dry-run
+complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -s v -l verbose
 complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -s q -l quiet
 complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -l remove-rare
 complete -c zsh-clean-history -n "__fish_zsh_clean_history_needs_command" -l no-log

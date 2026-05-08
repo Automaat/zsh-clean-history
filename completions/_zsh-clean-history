@@ -19,6 +19,8 @@ _zsh-clean-history() {
 '--rare-threshold=[]:RARE_THRESHOLD:_default' \
 '--log-max-bytes=[]:LOG_MAX_BYTES:_default' \
 '--dry-run[]' \
+'-v[]' \
+'--verbose[]' \
 '-q[]' \
 '--quiet[]' \
 '--remove-rare[]' \
