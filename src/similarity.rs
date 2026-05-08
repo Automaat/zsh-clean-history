@@ -12,22 +12,37 @@ fn norm_patterns() -> &'static [(Regex, &'static str)] {
         vec![
             (Regex::new(r"^https?://").unwrap(), "<URL>"),
             (Regex::new(r"^/").unwrap(), "<PATH>"),
-            (Regex::new(r"^v\d+\.\d+\.\d+").unwrap(), "<VER>"),
+            (Regex::new(r"^v\d+\.\d+\.\d+$").unwrap(), "<VER>"),
             (Regex::new(r"^[0-9a-fA-F]{6,}$").unwrap(), "<SHA>"),
         ]
     })
 }
 
+/// Strip symmetric single or double shell quotes from a token.
+fn strip_shell_quotes(tok: &str) -> &str {
+    let b = tok.as_bytes();
+    if b.len() >= 2 {
+        let (first, last) = (b[0], b[b.len() - 1]);
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &tok[1..tok.len() - 1];
+        }
+    }
+    tok
+}
+
 /// Normalise volatile tokens in a command string for similarity comparison.
 ///
 /// Replaces hex SHAs (≥6 hex chars), absolute paths (`/…`), URLs (`https?://…`),
-/// and semver strings (`vN.N.N`) with stable placeholders so that structurally
+/// and exact semver tags (`vN.N.N`) with stable placeholders so that structurally
 /// identical commands with different concrete values are not mistaken for typos.
+/// Symmetric shell quotes are stripped before classification so that quoted args
+/// like `"https://…"` or `'/tmp/…'` are normalised the same as unquoted ones.
 pub(crate) fn normalize(s: &str) -> String {
     s.split_whitespace()
         .map(|tok| {
+            let inner = strip_shell_quotes(tok);
             for (re, placeholder) in norm_patterns() {
-                if re.is_match(tok) {
+                if re.is_match(inner) {
                     return placeholder.to_string();
                 }
             }
@@ -245,6 +260,59 @@ mod tests {
         assert!(command_similar(
             "git checkot abc123",
             "git checkout abc123",
+            0.8
+        ));
+    }
+
+    // --- quoted token normalization ---
+
+    #[test]
+    fn normalize_double_quoted_url_replaced() {
+        assert_eq!(
+            normalize(r#"curl "https://api.example.com""#),
+            "curl <URL>"
+        );
+    }
+
+    #[test]
+    fn normalize_single_quoted_path_replaced() {
+        assert_eq!(normalize("ls '/home/user'"), "ls <PATH>");
+    }
+
+    #[test]
+    fn normalize_double_quoted_sha_replaced() {
+        assert_eq!(normalize(r#"git checkout "abc1234""#), "git checkout <SHA>");
+    }
+
+    #[test]
+    fn normalize_single_quoted_semver_replaced() {
+        assert_eq!(normalize("git checkout 'v1.2.3'"), "git checkout <VER>");
+    }
+
+    // --- semver anchoring ---
+
+    #[test]
+    fn normalize_semver_prerelease_not_replaced() {
+        assert_eq!(
+            normalize("git checkout v1.2.3-rc1"),
+            "git checkout v1.2.3-rc1"
+        );
+    }
+
+    #[test]
+    fn normalize_semver_suffix_not_replaced() {
+        assert_eq!(
+            normalize("git checkout v1.2.3-hotfix"),
+            "git checkout v1.2.3-hotfix"
+        );
+    }
+
+    #[test]
+    fn semver_prerelease_branches_not_collapsed() {
+        // v1.2.3-rc1 and v1.2.3-rc2 must remain distinct after normalization
+        assert!(!command_similar(
+            "git checkout v1.2.3-rc1",
+            "git checkout v1.2.3-rc2",
             0.8
         ));
     }
