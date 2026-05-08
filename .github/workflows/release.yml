@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type (ignored if version is set)'
+        type: choice
+        options:
+          - minor
+          - major
+          - patch
+        default: minor
+      version:
+        description: 'Specific version (e.g. 1.2.3); overrides bump'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Bump version and tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      tag: ${{ steps.compute.outputs.tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: taiki-e/install-action@3fa6878dc4ae603f73960271565a082bf196ab96 # v2.77.2
+        with:
+          tool: cargo-edit
+      - name: Compute new version
+        id: compute
+        env:
+          BUMP: ${{ inputs.bump }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERSION" ]; then
+            new="$VERSION"
+          else
+            current=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+            IFS=. read -r major minor patch <<< "$current"
+            case "$BUMP" in
+              major) new="$((major+1)).0.0" ;;
+              minor) new="$major.$((minor+1)).0" ;;
+              patch) new="$major.$minor.$((patch+1))" ;;
+              *) echo "invalid bump: $BUMP" >&2; exit 1 ;;
+            esac
+          fi
+          if ! [[ "$new" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "invalid semver: $new" >&2
+            exit 1
+          fi
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "tag=v$new" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$new"
+      - name: Refuse if tag exists
+        env:
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG already exists" >&2
+            exit 1
+          fi
+      - name: Bump Cargo.toml
+        env:
+          NEW: ${{ steps.compute.outputs.version }}
+        run: cargo set-version "$NEW"
+      - name: Commit, tag, push
+        env:
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(release): $TAG"
+          git tag "$TAG"
+          git push origin HEAD:main
+          git push origin "$TAG"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="zsh-clean-history-${VERSION}-${TARGET}"
+          mkdir -p "dist/$name"
+          cp "target/${TARGET}/release/zsh-clean-history" "dist/$name/"
+          cp README.md LICENSE zsh-clean-history.plugin.zsh "dist/$name/"
+          cp -r completions man "dist/$name/"
+          cd dist
+          tar czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: artifact-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            dist/*.tar.gz dist/*.tar.gz.sha256
