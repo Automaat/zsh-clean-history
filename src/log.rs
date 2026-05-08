@@ -165,7 +165,7 @@ mod tests {
             reason: "Secret pattern: AWS secret key".into(),
             command: "export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG".into(),
         }];
-        write_log_entry(&log, &settings, false, 10, &removals).unwrap();
+        write_log_entry(&log, &settings, false, 10, &removals, u64::MAX).unwrap();
 
         let body = fs::read_to_string(&log).unwrap();
         let v: Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
