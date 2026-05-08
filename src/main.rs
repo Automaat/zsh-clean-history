@@ -10,8 +10,8 @@ use fs2::FileExt;
 use tempfile::NamedTempFile;
 use zsh_clean_history::cleaner::Removal;
 use zsh_clean_history::{
-    CleaningSettings, Paths, compact_exits_file, identify_removals, load_exit_codes,
-    parse_history_file, write_log_entry,
+    CleaningSettings, DEFAULT_LOG_MAX_BYTES, Paths, compact_exits_file, identify_removals,
+    load_exit_codes, parse_history_file, write_log_entry,
 };
 
 #[derive(Parser)]
@@ -33,7 +33,7 @@ struct Cli {
     remove_rare: bool,
     #[arg(long)]
     no_log: bool,
-    #[arg(long, default_value_t = 1024 * 1024)]
+    #[arg(long, default_value_t = DEFAULT_LOG_MAX_BYTES)]
     log_max_bytes: u64,
     #[command(subcommand)]
     cmd: Option<Cmd>,
