@@ -27,6 +27,11 @@ pub fn parse_history_file(path: &Path, exit_codes: &HashMap<String, i32>) -> Res
 }
 
 pub fn parse_history_text(text: &str, exit_codes: &HashMap<String, i32>) -> ParsedHistory {
+    // strip sub-second precision for history timestamp matching (history uses integer seconds)
+    let normalized: HashMap<&str, i32> = exit_codes
+        .iter()
+        .map(|(k, v)| (k.split_once('.').map(|(s, _)| s).unwrap_or(k.as_str()), *v))
+        .collect();
     let mut parsed = ParsedHistory::default();
     let raw_lines: Vec<&str> = text.split_inclusive('\n').collect();
 
@@ -63,7 +68,7 @@ pub fn parse_history_text(text: &str, exit_codes: &HashMap<String, i32>) -> Pars
                 .push(entry_idx);
             parsed.last_seen.insert(cmd.clone(), entry_idx);
 
-            match exit_codes.get(&ts) {
+            match normalized.get(ts.as_str()) {
                 Some(0) => *parsed.successful_counts.entry(cmd).or_default() += 1,
                 Some(_) => *parsed.failed_counts.entry(cmd).or_default() += 1,
                 None => {}
