@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -41,6 +41,7 @@ struct Cli {
 enum Cmd {
     Undo,
     RecordExit { timestamp: String, exit_code: i32 },
+    Explain { command: String },
 }
 
 fn main() -> Result<()> {
@@ -53,16 +54,21 @@ fn main() -> Result<()> {
             timestamp,
             exit_code,
         }) => zsh_clean_history::exits::append_exit(&paths.exits, &timestamp, exit_code),
+        Some(Cmd::Explain { ref command }) => explain(command, &cli, &paths),
         None => run_cleanup(&cli, &paths),
     }
 }
 
-fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
-    let settings = CleaningSettings {
+fn settings_from_cli(cli: &Cli) -> CleaningSettings {
+    CleaningSettings {
         similarity_threshold: cli.similarity,
         rare_threshold: cli.rare_threshold,
         remove_rare: cli.remove_rare,
-    };
+    }
+}
+
+fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
+    let settings = settings_from_cli(cli);
 
     let _lock = LockedHistory::acquire(&paths.lock_file())?;
 
@@ -126,6 +132,47 @@ fn run_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
+    let settings = settings_from_cli(cli);
+
+    let exit_codes = load_exit_codes(&paths.exits)?;
+    let parsed = parse_history_file(&paths.history, &exit_codes)?;
+    let removals = identify_removals(&parsed, &settings);
+    let removal_map: HashMap<usize, &Removal> = removals.iter().map(|r| (r.line, r)).collect();
+
+    let success_count = parsed.successful_counts.get(command).copied().unwrap_or(0);
+    let fail_count = parsed.failed_counts.get(command).copied().unwrap_or(0);
+    let indices = parsed
+        .cmd_to_lines
+        .get(command)
+        .cloned()
+        .unwrap_or_default();
+
+    if indices.is_empty() {
+        anyhow::bail!("command not found in history: {command}");
+    }
+
+    println!("command:  {command}");
+    println!("runs:     success={success_count} failed={fail_count}");
+    println!("entries:  {}", indices.len());
+
+    for &idx in &indices {
+        print!("  [{idx}] ");
+        if let Some(removal) = removal_map.get(&idx) {
+            print!("REMOVE  reason: {}", removal.reason);
+            if let Some(ref candidate) = removal.candidate {
+                let sim = zsh_clean_history::similarity::ratio(command, candidate);
+                print!("  similarity: {sim:.2}");
+            }
+        } else {
+            print!("KEEP");
+        }
+        println!();
+    }
+
     Ok(())
 }
 

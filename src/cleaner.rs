@@ -11,10 +11,11 @@ pub struct Removal {
     pub line: usize,
     pub reason: String,
     pub command: String,
+    pub candidate: Option<String>,
 }
 
 pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) -> Vec<Removal> {
-    let mut removals: HashMap<usize, String> = HashMap::new();
+    let mut removals: HashMap<usize, (String, Option<String>)> = HashMap::new();
     dedup_keep_newest(parsed, &mut removals);
     failed_similar_to_successful(parsed, settings, &mut removals);
     if settings.remove_rare {
@@ -22,7 +23,7 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
     }
     let mut out: Vec<Removal> = removals
         .into_iter()
-        .map(|(idx, reason)| {
+        .map(|(idx, (reason, candidate))| {
             let command = parsed
                 .entries
                 .get(idx)
@@ -32,6 +33,7 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
                 line: idx,
                 reason,
                 command,
+                candidate,
             }
         })
         .collect();
@@ -39,7 +41,10 @@ pub fn identify_removals(parsed: &ParsedHistory, settings: &CleaningSettings) ->
     out
 }
 
-fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, String>) {
+fn dedup_keep_newest(
+    parsed: &ParsedHistory,
+    removals: &mut HashMap<usize, (String, Option<String>)>,
+) {
     for (cmd, indices) in &parsed.cmd_to_lines {
         if indices.len() <= 1 {
             continue;
@@ -49,7 +54,7 @@ fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, Strin
             if idx != keep {
                 removals
                     .entry(idx)
-                    .or_insert_with(|| "Duplicate".to_string());
+                    .or_insert_with(|| ("Duplicate".to_string(), None));
             }
         }
     }
@@ -58,7 +63,7 @@ fn dedup_keep_newest(parsed: &ParsedHistory, removals: &mut HashMap<usize, Strin
 fn failed_similar_to_successful(
     parsed: &ParsedHistory,
     settings: &CleaningSettings,
-    removals: &mut HashMap<usize, String>,
+    removals: &mut HashMap<usize, (String, Option<String>)>,
 ) {
     let by_base = group_by_base_strings(parsed.successful_counts.keys());
     for (failed_cmd, &fail_count) in &parsed.failed_counts {
@@ -67,7 +72,7 @@ fn failed_similar_to_successful(
             Some(v) => v,
             None => continue,
         };
-        let mut chosen: Option<String> = None;
+        let mut chosen: Option<(String, Option<String>)> = None;
         for &success_cmd in candidates {
             if success_cmd == failed_cmd {
                 continue;
@@ -82,19 +87,25 @@ fn failed_similar_to_successful(
             }
             if success_cmd.starts_with(failed_cmd.as_str()) && success_cmd.len() > failed_cmd.len()
             {
-                chosen = Some(format!("Failed prefix of '{success_cmd}'"));
+                chosen = Some((
+                    format!("Failed prefix of '{success_cmd}'"),
+                    Some(success_cmd.to_string()),
+                ));
                 break;
             }
             let sim = ratio(failed_cmd, success_cmd);
             if (settings.similarity_threshold..1.0).contains(&sim) {
-                chosen = Some(format!("Failed similar to '{success_cmd}'"));
+                chosen = Some((
+                    format!("Failed similar to '{success_cmd}'"),
+                    Some(success_cmd.to_string()),
+                ));
                 break;
             }
         }
-        if let Some(reason) = chosen {
+        if let Some(entry) = chosen {
             if let Some(indices) = parsed.cmd_to_lines.get(failed_cmd) {
                 for &idx in indices {
-                    removals.entry(idx).or_insert_with(|| reason.clone());
+                    removals.entry(idx).or_insert_with(|| entry.clone());
                 }
             }
         }
@@ -104,7 +115,7 @@ fn failed_similar_to_successful(
 fn rare_variants(
     parsed: &ParsedHistory,
     settings: &CleaningSettings,
-    removals: &mut HashMap<usize, String>,
+    removals: &mut HashMap<usize, (String, Option<String>)>,
 ) {
     let mut all_counts: HashMap<&str, usize> = HashMap::new();
     for (cmd, &n) in &parsed.successful_counts {
@@ -133,9 +144,12 @@ fn rare_variants(
             let sim = ratio(rare_cmd, common_cmd);
             if sim >= settings.similarity_threshold {
                 if let Some(indices) = parsed.cmd_to_lines.get(*rare_cmd) {
-                    let reason = format!("Rare variant of '{common_cmd}'");
+                    let entry = (
+                        format!("Rare variant of '{common_cmd}'"),
+                        Some(common_cmd.to_string()),
+                    );
                     for &idx in indices {
-                        removals.entry(idx).or_insert_with(|| reason.clone());
+                        removals.entry(idx).or_insert_with(|| entry.clone());
                     }
                 }
                 break;
