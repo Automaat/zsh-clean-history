@@ -129,15 +129,19 @@ pub(crate) fn prune_old_backups(history: &Path, keep: usize) -> Result<()> {
             .and_then(|s| s.to_str())
             .unwrap_or(".zsh_history")
     );
-    let mut backups: Vec<PathBuf> = fs::read_dir(parent)?
-        .filter_map(|r| r.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.file_name()
-                .and_then(|s| s.to_str())
-                .map(|n| n.starts_with(&prefix))
-                .unwrap_or(false)
-        })
-        .collect();
+    let mut backups: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|n| n.starts_with(&prefix))
+            .unwrap_or(false)
+        {
+            backups.push(path);
+        }
+    }
     backups.sort();
     if backups.len() > keep {
         let drop_count = backups.len() - keep;
