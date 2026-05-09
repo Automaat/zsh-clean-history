@@ -159,15 +159,23 @@ fn undo(paths: &Paths) -> Result<()> {
             .and_then(|s| s.to_str())
             .unwrap_or(".zsh_history")
     );
-    let mut backups: Vec<PathBuf> = fs::read_dir(&parent)?
-        .filter_map(|r| r.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.file_name()
-                .and_then(|s| s.to_str())
-                .map(|n| n.starts_with(&prefix))
-                .unwrap_or(false)
-        })
-        .collect();
+    let mut backups: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(&parent)? {
+        match entry {
+            Ok(e) => {
+                let path = e.path();
+                if path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|n| n.starts_with(&prefix))
+                    .unwrap_or(false)
+                {
+                    backups.push(path);
+                }
+            }
+            Err(e) => eprintln!("warning: could not read backup entry: {e}"),
+        }
+    }
     backups.sort();
     let latest = backups
         .last()
