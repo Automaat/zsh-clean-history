@@ -254,9 +254,14 @@ fn rare_variants(
     let mut weighted_counts: HashMap<&str, f64> = HashMap::new();
     for entry in &parsed.entries {
         if let (Some(ts_str), Some(cmd)) = (&entry.timestamp, &entry.command) {
-            if let Ok(ts) = ts_str.parse::<i64>() {
-                let w = time_decay_weight(ts, now_secs);
-                *weighted_counts.entry(cmd.as_str()).or_default() += w;
+            match ts_str.parse::<i64>() {
+                Ok(ts) => {
+                    let w = time_decay_weight(ts, now_secs);
+                    *weighted_counts.entry(cmd.as_str()).or_default() += w;
+                }
+                Err(_) => {
+                    *weighted_counts.entry(cmd.as_str()).or_default() += 0.0;
+                }
             }
         }
     }
@@ -1326,6 +1331,46 @@ mod tests {
         assert!(
             !removals2.iter().any(|r| r.reason.contains("Rare variant")),
             "rare_weight=4.0 at threshold=3.0 must not be removed; removals: {removals2:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_timestamp_entry_still_counted_with_zero_weight() {
+        // Entry with an i64-overflow timestamp must be included in weighted_counts
+        // (weight 0.0) rather than silently dropped, so it still participates
+        // in rare-variant detection.
+        //
+        // parse_line accepts all-digit timestamps, so "99999999999999999999"
+        // passes the history parser but overflows i64::MAX and would previously
+        // cause the entry to be silently skipped.
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let good_ts = now - 24 * 3600;
+        // 10 valid "git status" entries give weight > 0
+        // 1 "git statsu" entry with an overflow timestamp → weight 0.0
+        // 0.0 <= 3.0 (rare_threshold) → reaches rare-variant check
+        // common_weight > 0.0 * 3 = 0.0 → removed
+        let overflow_ts = "99999999999999999999"; // overflows i64
+        let mut text = String::new();
+        let mut exits: Vec<(String, i32)> = Vec::new();
+        for i in 0..10 {
+            text.push_str(&format!(": {}:0;git status\n", good_ts + i));
+            exits.push(((good_ts + i).to_string(), 0));
+        }
+        text.push_str(&format!(": {overflow_ts}:0;git statsu\n"));
+        exits.push((overflow_ts.to_string(), 0));
+        let exits_ref: Vec<(&str, i32)> = exits.iter().map(|(t, c)| (t.as_str(), *c)).collect();
+        let h = parse_with_exits(&text, &exits_ref);
+        let s = CleaningSettings {
+            remove_rare: true,
+            ..Default::default()
+        };
+        let removals = identify_removals(&h, &s, None);
+        assert!(
+            removals.iter().any(|r| r.reason.contains("Rare variant")),
+            "entry with overflow timestamp must still be subject to rare-variant removal"
         );
     }
 }
