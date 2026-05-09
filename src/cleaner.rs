@@ -260,7 +260,6 @@ fn rare_variants(
                     *weighted_counts.entry(cmd.as_str()).or_default() += w;
                 }
                 Err(_) => {
-                    eprintln!("warning: could not parse timestamp: {:?}", ts_str);
                     *weighted_counts.entry(cmd.as_str()).or_default() += 0.0;
                 }
             }
