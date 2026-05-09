@@ -131,19 +131,15 @@ pub(crate) fn prune_old_backups(history: &Path, keep: usize) -> Result<()> {
     );
     let mut backups: Vec<PathBuf> = Vec::new();
     for entry in fs::read_dir(parent)? {
-        match entry {
-            Ok(e) => {
-                let path = e.path();
-                if path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .map(|n| n.starts_with(&prefix))
-                    .unwrap_or(false)
-                {
-                    backups.push(path);
-                }
-            }
-            Err(e) => eprintln!("warning: could not read backup entry: {e}"),
+        let entry = entry?;
+        let path = entry.path();
+        if path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|n| n.starts_with(&prefix))
+            .unwrap_or(false)
+        {
+            backups.push(path);
         }
     }
     backups.sort();
