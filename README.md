@@ -15,6 +15,15 @@ Smart zsh history cleanup. Removes typos, failed commands, and duplicates from `
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install Automaat/tap/zsh-clean-history
+```
+
+Installs the binary, man page, and shell completions. `brew info` prints how to
+source the plugin from `$(brew --prefix)/share/zsh-clean-history`.
+
 ### Build & install the binary
 
 ```bash
