@@ -49,13 +49,17 @@ clean-history-info
 
 ## Releases
 
+Releases use the custom `.github/workflows/release.yml` workflow only — there
+is no cargo-dist setup.
+
 1. Run the Release workflow from `main`
 2. `prepare` computes the version and refuses existing tags
 3. Build jobs bump the version locally and upload archives/checksums
 4. `release` verifies every artifact before pushing the version commit/tag
 5. `release` creates the GitHub release from verified artifacts
 
-Failed builds leave `main` and tags unchanged.
+Each archive bundles the binary, README, LICENSE, plugin, `completions/`, and
+`man/`. Failed builds leave `main` and tags unchanged.
 
 ## Project structure
 
