@@ -31,3 +31,7 @@ run = [
 [tasks.fmt]
 description = "Format Rust code"
 run = "cargo fmt --all"
+
+[tasks.audit]
+description = "Audit deps for RustSec advisories (cargo-audit required)"
+run = "cargo audit --deny warnings"
