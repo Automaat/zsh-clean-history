@@ -1,4 +1,5 @@
 target/
+lcov.info
 Cargo.lock.bak
 *.backup
 .DS_Store
