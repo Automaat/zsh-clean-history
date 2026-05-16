@@ -1,7 +1,8 @@
 [tools]
-rust = "1.95.0"
+rust = { version = "1.95.0", components = "llvm-tools-preview" }
 shellcheck = "0.11.0"
 actionlint = "1.7.12"
+"cargo:cargo-llvm-cov" = "0.8.6"
 
 [tasks.build]
 description = "Build release binary"
@@ -16,7 +17,7 @@ description = "Run all tests"
 run = "cargo test --all-targets"
 
 [tasks.test-cov]
-description = "Run tests with coverage (cargo-llvm-cov required)"
+description = "Run tests with coverage"
 run = "cargo llvm-cov --all-targets --lcov --output-path lcov.info"
 
 [tasks.check]
