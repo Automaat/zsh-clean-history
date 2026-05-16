@@ -51,18 +51,3 @@ codegen-units = 1
 strip = true
 
 [workspace]
-
-# cargo-dist
-[workspace.metadata.dist]
-cargo-dist-version = "0.28.0"
-ci = ["github"]
-installers = ["shell", "homebrew"]
-targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
-include = [
-    "completions/_zsh-clean-history",
-    "completions/zsh-clean-history.bash",
-    "completions/zsh-clean-history.fish",
-    "completions/zsh-clean-history.elv",
-    "completions/_zsh-clean-history.ps1",
-    "man/zsh-clean-history.1",
-]
