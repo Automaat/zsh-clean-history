@@ -44,7 +44,12 @@ jobs:
           if [ -n "$VERSION" ]; then
             new="$VERSION"
           else
-            current=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+            latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+            if [ -n "$latest" ]; then
+              current="${latest#v}"
+            else
+              current=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+            fi
             IFS=. read -r major minor patch <<< "$current"
             case "$BUMP" in
               major) new="$((major+1)).0.0" ;;
@@ -143,9 +148,6 @@ jobs:
       - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      - uses: taiki-e/install-action@184183c2401be73c3bf42c2e61268aa5855379c1 # v2.78.1
-        with:
-          tool: cargo-edit
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
@@ -173,19 +175,13 @@ jobs:
             checksum_name="zsh-clean-history-${VERSION}-${target}.tar.gz.sha256"
             (cd dist && shasum -a 256 -c "$checksum_name")
           done
-      - name: Commit, tag, push
+      - name: Tag and push
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
-          NEW: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          cargo set-version "$NEW"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add Cargo.toml Cargo.lock
-          git commit -m "chore(release): $TAG"
           git tag "$TAG"
-          git push --atomic origin HEAD:main "$TAG"
+          git push origin "$TAG"
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
