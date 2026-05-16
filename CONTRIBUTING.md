@@ -47,6 +47,16 @@ clean-history-info
    - Implementation details
    - Supporting docs/issues
 
+## Releases
+
+1. Run the Release workflow from `main`
+2. `prepare` computes the version and refuses existing tags
+3. Build jobs bump the version locally and upload archives/checksums
+4. `release` verifies every artifact before pushing the version commit/tag
+5. `release` creates the GitHub release from verified artifacts
+
+Failed builds leave `main` and tags unchanged.
+
 ## Project structure
 
 ```
