@@ -1,5 +1,5 @@
 [tools]
-rust = { version = "1.97.0", components = "llvm-tools-preview" }
+rust = { version = "1.97.1", components = "llvm-tools-preview" }
 shellcheck = "0.11.0"
 actionlint = "1.7.12"
 "cargo:cargo-llvm-cov" = "0.8.6"
