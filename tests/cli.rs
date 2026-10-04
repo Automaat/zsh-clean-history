@@ -178,6 +178,22 @@ fn plugin_marks_lock_failure_without_dropping_history() {
 }
 
 #[test]
+fn plugin_keeps_session_history_when_pending_write_fails() {
+    let dir = tempdir().unwrap();
+    let script = format!(
+        "source '{}'; _zsh_clean_history_lock_supported=false; _zsh_clean_history_pending_file=$HOME; _zsh_clean_history_before_history 'echo saved\\n'; [[ $? == 2 ]]",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/zsh-clean-history.plugin.zsh")
+    );
+    let output = ProcessCommand::new("zsh")
+        .args(["-fc", &script])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("kept in session history"));
+}
+
+#[test]
 fn applies_dedup_keeping_newest() {
     let dir = tempdir().unwrap();
     let home = dir.path();

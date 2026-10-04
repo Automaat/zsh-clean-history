@@ -82,7 +82,9 @@ _zsh_clean_history_lock_or_warn() {
 _zsh_clean_history_before_history() {
     _zsh_clean_history_lock_or_warn && return 0
     [[ ! -f "$_zsh_clean_history_pending_file" ]] || chmod 0600 "$_zsh_clean_history_pending_file" 2>/dev/null
-    (umask 0177 && print -rn -- "$1" >>! "$_zsh_clean_history_pending_file") || return 1
+    if ! (umask 0177 && print -rn -- "$1" >>! "$_zsh_clean_history_pending_file"); then
+        print -u2 -- "zsh-clean-history: could not save pending command; kept in session history only"
+    fi
     return 2
 }
 
