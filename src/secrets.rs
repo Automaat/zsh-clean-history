@@ -85,7 +85,7 @@ mod tests {
     fn parse(text: &str, exits: &[(&str, i32)]) -> ParsedHistory {
         let map = exits
             .iter()
-            .map(|(ts, c)| ((*ts).to_string(), *c))
+            .map(|(ts, c)| ((*ts).to_string(), vec![*c]))
             .collect();
         parse_history_text(text, &map)
     }

@@ -20,23 +20,29 @@ pub struct ParsedHistory {
     pub last_seen: HashMap<String, usize>,
 }
 
-pub fn parse_history_file(path: &Path, exit_codes: &HashMap<String, i32>) -> Result<ParsedHistory> {
+pub fn parse_history_file(
+    path: &Path,
+    exit_codes: &HashMap<String, Vec<i32>>,
+) -> Result<ParsedHistory> {
     let bytes = fs::read(path).with_context(|| format!("read history {}", path.display()))?;
     let text = String::from_utf8(bytes)
         .with_context(|| format!("history {} contains invalid UTF-8", path.display()))?;
     Ok(parse_history_text(&text, exit_codes))
 }
 
-pub fn parse_history_text(text: &str, exit_codes: &HashMap<String, i32>) -> ParsedHistory {
+pub fn parse_history_text(text: &str, exit_codes: &HashMap<String, Vec<i32>>) -> ParsedHistory {
     // strip sub-second precision for history timestamp matching (history uses integer seconds)
     let mut normalized: HashMap<&str, (i32, usize)> = HashMap::new();
-    for (timestamp, &code) in exit_codes {
+    for (timestamp, codes) in exit_codes {
+        let Some(&code) = codes.first() else {
+            continue;
+        };
         let second = timestamp
             .split_once('.')
             .map(|(s, _)| s)
             .unwrap_or(timestamp.as_str());
         let value = normalized.entry(second).or_insert((code, 0));
-        value.1 += 1;
+        value.1 += codes.len();
     }
     let mut parsed = ParsedHistory::default();
     let raw_lines: Vec<&str> = text.split_inclusive('\n').collect();
@@ -179,8 +185,8 @@ mod tests {
     #[test]
     fn classifies_success_and_failure_by_exit() {
         let mut exits = HashMap::new();
-        exits.insert("1".to_string(), 0);
-        exits.insert("2".to_string(), 1);
+        exits.insert("1".to_string(), vec![0]);
+        exits.insert("2".to_string(), vec![1]);
         let h = parse_history_text(": 1:0;ls\n: 2:0;gti status\n", &exits);
         assert_eq!(h.successful_counts.get("ls"), Some(&1));
         assert_eq!(h.failed_counts.get("gti status"), Some(&1));
@@ -189,9 +195,17 @@ mod tests {
     #[test]
     fn shared_seconds_have_no_attributed_exit_status() {
         let mut exits = HashMap::new();
-        exits.insert("1.100".to_string(), 0);
-        exits.insert("1.200".to_string(), 1);
+        exits.insert("1.100".to_string(), vec![0]);
+        exits.insert("1.200".to_string(), vec![1]);
         let h = parse_history_text(": 1:0;git status\n: 1:0;git statsu\n", &exits);
+        assert!(h.successful_counts.is_empty());
+        assert!(h.failed_counts.is_empty());
+    }
+
+    #[test]
+    fn duplicate_exit_timestamp_has_no_attributed_status() {
+        let exits = HashMap::from([("1.100".to_string(), vec![0, 1])]);
+        let h = parse_history_text(": 1:0;git status\n", &exits);
         assert!(h.successful_counts.is_empty());
         assert!(h.failed_counts.is_empty());
     }
@@ -256,7 +270,7 @@ mod props {
         #[test]
         fn all_indices_in_bounds(
             text in any::<String>(),
-            exits in proptest::collection::hash_map(any::<String>(), any::<i32>(), 0..10),
+            exits in proptest::collection::hash_map(any::<String>(), proptest::collection::vec(any::<i32>(), 0..3), 0..10),
         ) {
             let result = parse_history_text(&text, &exits);
             let n = result.entries.len();
