@@ -1435,6 +1435,7 @@ dependencies = [
  "clap_mangen",
  "criterion",
  "fs2",
+ "libc",
  "predicates",
  "proptest",
  "regex",

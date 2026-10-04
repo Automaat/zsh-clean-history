@@ -22,30 +22,35 @@ pub struct ParsedHistory {
 
 pub fn parse_history_file(path: &Path, exit_codes: &HashMap<String, i32>) -> Result<ParsedHistory> {
     let bytes = fs::read(path).with_context(|| format!("read history {}", path.display()))?;
-    let text = String::from_utf8_lossy(&bytes);
+    let text = String::from_utf8(bytes)
+        .with_context(|| format!("history {} contains invalid UTF-8", path.display()))?;
     Ok(parse_history_text(&text, exit_codes))
 }
 
 pub fn parse_history_text(text: &str, exit_codes: &HashMap<String, i32>) -> ParsedHistory {
     // strip sub-second precision for history timestamp matching (history uses integer seconds)
-    let normalized: HashMap<&str, i32> = exit_codes
-        .iter()
-        .map(|(k, v)| (k.split_once('.').map(|(s, _)| s).unwrap_or(k.as_str()), *v))
-        .collect();
+    let mut normalized: HashMap<&str, (i32, usize)> = HashMap::new();
+    for (timestamp, &code) in exit_codes {
+        let second = timestamp
+            .split_once('.')
+            .map(|(s, _)| s)
+            .unwrap_or(timestamp.as_str());
+        let value = normalized.entry(second).or_insert((code, 0));
+        value.1 += 1;
+    }
     let mut parsed = ParsedHistory::default();
     let raw_lines: Vec<&str> = text.split_inclusive('\n').collect();
 
     let mut idx = 0usize;
     while idx < raw_lines.len() {
         let first = raw_lines[idx].trim_end_matches('\n');
-        let mut raw_full = first.to_string();
+        let mut raw_full = raw_lines[idx].to_string();
         let mut joined = first.to_string();
         let mut consumed = 1usize;
 
         while ends_with_unescaped_backslash(&joined) && idx + consumed < raw_lines.len() {
             let next = raw_lines[idx + consumed].trim_end_matches('\n');
-            raw_full.push('\n');
-            raw_full.push_str(next);
+            raw_full.push_str(raw_lines[idx + consumed]);
             joined.pop();
             joined.push('\n');
             joined.push_str(next);
@@ -60,24 +65,37 @@ pub fn parse_history_text(text: &str, exit_codes: &HashMap<String, i32>) -> Pars
         });
         let entry_idx = parsed.entries.len() - 1;
 
-        if let (Some(ts), Some(cmd)) = (timestamp, command) {
+        if let (Some(_), Some(cmd)) = (timestamp, command) {
             parsed
                 .cmd_to_lines
                 .entry(cmd.clone())
                 .or_default()
                 .push(entry_idx);
             parsed.last_seen.insert(cmd.clone(), entry_idx);
-
-            match normalized.get(ts.as_str()) {
-                Some(0) => *parsed.successful_counts.entry(cmd).or_default() += 1,
-                Some(_) => *parsed.failed_counts.entry(cmd).or_default() += 1,
-                None => {}
-            }
         }
 
         idx += consumed;
     }
 
+    let mut history_seconds: HashMap<&str, usize> = HashMap::new();
+    for entry in &parsed.entries {
+        if let Some(timestamp) = &entry.timestamp {
+            *history_seconds.entry(timestamp).or_default() += 1;
+        }
+    }
+    for entry in &parsed.entries {
+        let (Some(timestamp), Some(command)) = (&entry.timestamp, &entry.command) else {
+            continue;
+        };
+        if history_seconds.get(timestamp.as_str()) != Some(&1) {
+            continue;
+        }
+        match normalized.get(timestamp.as_str()) {
+            Some((0, 1)) => *parsed.successful_counts.entry(command.clone()).or_default() += 1,
+            Some((_, 1)) => *parsed.failed_counts.entry(command.clone()).or_default() += 1,
+            _ => {}
+        }
+    }
     parsed
 }
 
@@ -145,9 +163,9 @@ mod tests {
         let h = parse(text);
         assert_eq!(h.entries.len(), 2);
         assert_eq!(h.entries[0].command.as_deref(), Some("echo foo \nbar baz"));
-        assert_eq!(h.entries[0].raw, ": 1234567890:0;echo foo \\\nbar baz");
+        assert_eq!(h.entries[0].raw, ": 1234567890:0;echo foo \\\nbar baz\n");
         assert_eq!(h.entries[1].command.as_deref(), Some("pwd"));
-        assert_eq!(h.entries[1].raw, ": 1234567891:0;pwd");
+        assert_eq!(h.entries[1].raw, ": 1234567891:0;pwd\n");
     }
 
     #[test]
@@ -166,6 +184,16 @@ mod tests {
         let h = parse_history_text(": 1:0;ls\n: 2:0;gti status\n", &exits);
         assert_eq!(h.successful_counts.get("ls"), Some(&1));
         assert_eq!(h.failed_counts.get("gti status"), Some(&1));
+    }
+
+    #[test]
+    fn shared_seconds_have_no_attributed_exit_status() {
+        let mut exits = HashMap::new();
+        exits.insert("1.100".to_string(), 0);
+        exits.insert("1.200".to_string(), 1);
+        let h = parse_history_text(": 1:0;git status\n: 1:0;git statsu\n", &exits);
+        assert!(h.successful_counts.is_empty());
+        assert!(h.failed_counts.is_empty());
     }
 
     #[test]

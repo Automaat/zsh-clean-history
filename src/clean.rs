@@ -1,10 +1,13 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::Local;
+#[cfg(not(unix))]
 use fs2::FileExt;
 use tempfile::NamedTempFile;
 
@@ -21,28 +24,53 @@ pub struct CleanReport {
 }
 
 pub struct LockedHistory {
-    file: fs::File,
+    _file: fs::File,
 }
 
 impl LockedHistory {
     pub fn acquire(path: &Path) -> Result<Self> {
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let file = options
             .open(path)
             .with_context(|| format!("open {} for lock", path.display()))?;
-        file.lock_exclusive()
-            .with_context(|| format!("lock {}", path.display()))?;
-        Ok(Self { file })
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("secure lock {}", path.display()))?;
+        }
+        lock_file(&file).with_context(|| format!("lock {}", path.display()))?;
+        Ok(Self { _file: file })
     }
 }
 
-impl Drop for LockedHistory {
-    fn drop(&mut self) {
-        let _ = FileExt::unlock(&self.file);
+#[cfg(unix)]
+fn lock_file(file: &fs::File) -> Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // SAFETY: zero is valid for every field; the fields required by F_SETLKW are set below.
+    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+    lock.l_type = libc::F_WRLCK as _;
+    lock.l_whence = libc::SEEK_SET as _;
+    loop {
+        // SAFETY: file is open, lock points to a valid flock, and fcntl does not retain it.
+        if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLKW, &lock) } == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error.into());
+        }
     }
+}
+
+#[cfg(not(unix))]
+fn lock_file(file: &fs::File) -> Result<()> {
+    file.lock_exclusive()?;
+    Ok(())
 }
 
 pub fn run_cleanup(
@@ -60,13 +88,11 @@ pub fn run_cleanup(
     let drop_set = removals_set(&removals);
 
     if !dry_run && !removals.is_empty() {
-        let backup = paths.backup_for(&Local::now().format("%Y%m%d-%H%M%S").to_string());
         if paths.history.exists() {
-            fs::copy(&paths.history, &backup)
-                .with_context(|| format!("create backup at {}", backup.display()))?;
-            prune_old_backups(&paths.history, 5)?;
+            backup_history(paths)?;
         }
         write_history_atomically(&paths.history, &parsed.entries, &drop_set)?;
+        prune_old_backups(&paths.history, 5)?;
     }
 
     if !dry_run {
@@ -91,6 +117,64 @@ pub fn run_cleanup(
     })
 }
 
+fn backup_history(paths: &Paths) -> Result<PathBuf> {
+    let backup = paths.backup_for(&Local::now().format("%Y%m%d-%H%M%S-%9f").to_string());
+    let parent = paths.history.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = NamedTempFile::new_in(parent)
+        .with_context(|| format!("create backup in {}", parent.display()))?;
+    let mut source = fs::File::open(&paths.history)
+        .with_context(|| format!("open {} for backup", paths.history.display()))?;
+    std::io::copy(&mut source, &mut temp)
+        .with_context(|| format!("copy {} to backup", paths.history.display()))?;
+    temp.as_file().sync_all()?;
+    temp.persist_noclobber(&backup)
+        .map_err(|e| e.error)
+        .with_context(|| format!("persist backup at {}", backup.display()))?;
+    fs::File::open(parent)?.sync_all()?;
+    Ok(backup)
+}
+
+pub fn restore_latest_backup(paths: &Paths) -> Result<PathBuf> {
+    let _lock = LockedHistory::acquire(&paths.lock_file())?;
+    let parent = paths.history.parent().unwrap_or_else(|| Path::new("."));
+    let prefix = format!(
+        "{}.backup-",
+        paths
+            .history
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(".zsh_history")
+    );
+    let mut backups = Vec::new();
+    for entry in fs::read_dir(parent)? {
+        let path = entry?.path();
+        if path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|name| name.starts_with(&prefix))
+        {
+            backups.push(path);
+        }
+    }
+    backups.sort();
+    let latest = backups
+        .last()
+        .context("no backup files found to restore from")?;
+    let content = fs::read(latest).with_context(|| format!("read backup {}", latest.display()))?;
+    if paths.history.exists() {
+        backup_history(paths)?;
+    }
+    let mut temp = NamedTempFile::new_in(parent)?;
+    temp.write_all(&content)?;
+    temp.as_file().sync_all()?;
+    temp.persist(&paths.history)
+        .map_err(|e| e.error)
+        .with_context(|| format!("restore history {}", paths.history.display()))?;
+    fs::File::open(parent)?.sync_all()?;
+    prune_old_backups(&paths.history, 5)?;
+    Ok(latest.clone())
+}
+
 pub(crate) fn removals_set(removals: &[Removal]) -> HashSet<usize> {
     removals.iter().map(|r| r.line).collect()
 }
@@ -107,7 +191,6 @@ pub(crate) fn write_history_atomically(
             continue;
         }
         tmp.write_all(entry.raw.as_bytes())?;
-        tmp.write_all(b"\n")?;
     }
     tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
@@ -146,7 +229,8 @@ pub(crate) fn prune_old_backups(history: &Path, keep: usize) -> Result<()> {
     if backups.len() > keep {
         let drop_count = backups.len() - keep;
         for path in backups.into_iter().take(drop_count) {
-            let _ = fs::remove_file(path);
+            fs::remove_file(&path)
+                .with_context(|| format!("remove old backup {}", path.display()))?;
         }
     }
     Ok(())
@@ -166,7 +250,7 @@ mod tests {
 
     fn make_entry(raw: &str) -> HistoryEntry {
         HistoryEntry {
-            raw: raw.to_string(),
+            raw: format!("{raw}\n"),
             timestamp: None,
             command: None,
         }

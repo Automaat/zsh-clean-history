@@ -25,7 +25,7 @@ impl Paths {
     pub fn lock_file(&self) -> PathBuf {
         let mut p = self.history.clone();
         let name = format!(
-            "{}.lock",
+            "{}.cleaner.lock",
             p.file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or(".zsh_history"),

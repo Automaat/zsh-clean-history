@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -28,9 +30,16 @@ pub fn load_exit_codes(path: &Path) -> Result<HashMap<String, i32>> {
 }
 
 pub fn append_exit(path: &Path, timestamp: &str, code: i32) -> Result<()> {
-    let mut f = OpenOptions::new()
-        .create(true)
-        .append(true)
+    #[cfg(unix)]
+    if path.exists() {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("secure exits {}", path.display()))?;
+    }
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut f = options
         .open(path)
         .with_context(|| format!("open exits {}", path.display()))?;
     writeln!(f, "{timestamp}:{code}")?;
@@ -58,7 +67,9 @@ pub fn compact_exits_file(path: &Path, keep_timestamps: &HashSet<String>) -> Res
     for (ts, code) in &kept {
         writeln!(tmp, "{ts}:{code}")?;
     }
+    tmp.as_file().sync_all()?;
     tmp.persist(path).map_err(|e| e.error)?;
+    fs::File::open(parent)?.sync_all()?;
     Ok(dropped)
 }
 

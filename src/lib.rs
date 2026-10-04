@@ -6,6 +6,7 @@ pub mod history;
 pub mod log;
 pub mod paths;
 pub(crate) mod secrets;
+pub use secrets::contains_secret;
 pub mod settings;
 pub mod similarity;
 
