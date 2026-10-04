@@ -52,6 +52,10 @@ echo 'source ~/.zsh-clean-history/zsh-clean-history.plugin.zsh' >> ~/.zshrc
 The plugin auto-finds the binary on `PATH`, or falls back to `target/release/zsh-clean-history` inside the plugin dir.
 It uses `SHARE_HISTORY` when enabled, otherwise `INC_APPEND_HISTORY`. Plugin-enabled
 shells coordinate writes with the cleaner through `~/.zsh_history.cleaner.lock`.
+If a shell cannot acquire that lock, it stores commands in a private
+`~/.zsh_history.cleaner.pending.<pid>` file and leaves a
+`~/.zsh_history.cleaner.lock-failed` marker. Cleanup stops. Recover the pending
+commands, close affected shells, fix the lock failure, then remove the marker.
 
 ## Commands
 

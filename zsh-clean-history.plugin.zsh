@@ -35,6 +35,8 @@ typeset -g _zsh_clean_history_lock_supported=true
 zmodload zsh/system 2>/dev/null || _zsh_clean_history_lock_supported=false
 typeset -g _zsh_clean_history_exit_file="${HOME}/.zsh_history_exits"
 typeset -g _zsh_clean_history_lock_file="${HOME}/.zsh_history.cleaner.lock"
+typeset -g _zsh_clean_history_lock_failure_file="${HOME}/.zsh_history.cleaner.lock-failed"
+typeset -g _zsh_clean_history_pending_file="${HOME}/.zsh_history.cleaner.pending.$$"
 typeset -gi _zsh_clean_history_lock_fd=0
 typeset -g _zsh_clean_history_lock_failed=false
 typeset -g _zsh_clean_history_pending_ts=0
@@ -70,15 +72,18 @@ _zsh_clean_history_unlock() {
 _zsh_clean_history_lock_or_warn() {
     _zsh_clean_history_lock && return 0
     if [[ "$_zsh_clean_history_lock_failed" == false ]]; then
-        print -u2 -- "zsh-clean-history: lock unavailable; auto-clean disabled for this shell"
+        (umask 0177 && : >>! "$_zsh_clean_history_lock_failure_file") 2>/dev/null
+        print -u2 -- "zsh-clean-history: lock unavailable; cleanup disabled until the lock issue is fixed"
     fi
     _zsh_clean_history_lock_failed=true
     return 1
 }
 
 _zsh_clean_history_before_history() {
-    _zsh_clean_history_lock_or_warn
-    return 0
+    _zsh_clean_history_lock_or_warn && return 0
+    [[ ! -f "$_zsh_clean_history_pending_file" ]] || chmod 0600 "$_zsh_clean_history_pending_file" 2>/dev/null
+    (umask 0177 && print -rn -- "$1" >>! "$_zsh_clean_history_pending_file") || return 1
+    return 2
 }
 
 # preexec captures EPOCHREALTIME at command start, which matches the timestamp

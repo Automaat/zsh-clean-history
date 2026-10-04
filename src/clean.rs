@@ -79,6 +79,7 @@ pub fn run_cleanup(
     dry_run: bool,
 ) -> Result<CleanReport> {
     let _lock = LockedHistory::acquire(&paths.lock_file())?;
+    ensure_lock_supported(paths)?;
 
     let exit_codes = load_exit_codes(&paths.exits)?;
     let parsed = parse_history_file(&paths.history, &exit_codes)?;
@@ -88,14 +89,17 @@ pub fn run_cleanup(
     let drop_set = removals_set(&removals);
 
     if !dry_run && !removals.is_empty() {
+        ensure_lock_supported(paths)?;
         if paths.history.exists() {
             backup_history(paths)?;
         }
+        ensure_lock_supported(paths)?;
         write_history_atomically(&paths.history, &parsed.entries, &drop_set)?;
         prune_old_backups(&paths.history, 5)?;
     }
 
     if !dry_run {
+        ensure_lock_supported(paths)?;
         let keep_ts: HashSet<String> = parsed
             .entries
             .iter()
@@ -117,6 +121,17 @@ pub fn run_cleanup(
     })
 }
 
+fn ensure_lock_supported(paths: &Paths) -> Result<()> {
+    let marker = paths.lock_failure_marker();
+    if marker.exists() {
+        anyhow::bail!(
+            "history lock failed in a shell; resolve and remove {}",
+            marker.display()
+        );
+    }
+    Ok(())
+}
+
 fn backup_history(paths: &Paths) -> Result<PathBuf> {
     let backup = paths.backup_for(&Local::now().format("%Y%m%d-%H%M%S-%9f").to_string());
     let parent = paths.history.parent().unwrap_or_else(|| Path::new("."));
@@ -136,6 +151,7 @@ fn backup_history(paths: &Paths) -> Result<PathBuf> {
 
 pub fn restore_latest_backup(paths: &Paths) -> Result<PathBuf> {
     let _lock = LockedHistory::acquire(&paths.lock_file())?;
+    ensure_lock_supported(paths)?;
     let parent = paths.history.parent().unwrap_or_else(|| Path::new("."));
     let prefix = format!(
         "{}.backup-",

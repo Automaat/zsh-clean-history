@@ -34,6 +34,12 @@ impl Paths {
         p
     }
 
+    pub fn lock_failure_marker(&self) -> PathBuf {
+        let mut p = self.history.clone();
+        p.set_file_name(".zsh_history.cleaner.lock-failed");
+        p
+    }
+
     pub fn backup_for(&self, suffix: &str) -> PathBuf {
         let mut p = self.history.clone();
         let name = format!(

@@ -137,6 +137,47 @@ fn plugin_keeps_share_history_without_incremental_append() {
 }
 
 #[test]
+fn lock_failure_blocks_cleanup_without_changing_history() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    let original = b": 1:0;ls\n: 2:0;ls\n";
+    fs::write(home.join(".zsh_history"), original).unwrap();
+    fs::write(home.join(".zsh_history.cleaner.lock-failed"), "").unwrap();
+
+    run(home, &["--quiet"])
+        .failure()
+        .stderr(predicates::str::contains("history lock failed"));
+    assert_eq!(fs::read(home.join(".zsh_history")).unwrap(), original);
+}
+
+#[test]
+fn plugin_marks_lock_failure_without_dropping_history() {
+    let dir = tempdir().unwrap();
+    let script = format!(
+        "source '{}'; _zsh_clean_history_lock_supported=false; _zsh_clean_history_before_history 'echo saved\\n'; [[ $? == 2 ]]",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/zsh-clean-history.plugin.zsh")
+    );
+    let output = ProcessCommand::new("zsh")
+        .args(["-fc", &script])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(dir.path().join(".zsh_history.cleaner.lock-failed").exists());
+    let pending = fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".cleaner.pending.")
+        })
+        .unwrap();
+    assert_eq!(fs::read_to_string(pending.path()).unwrap(), "echo saved\\n");
+}
+
+#[test]
 fn applies_dedup_keeping_newest() {
     let dir = tempdir().unwrap();
     let home = dir.path();
