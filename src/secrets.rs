@@ -55,11 +55,11 @@ pub fn contains_secret(text: &str) -> bool {
 }
 
 pub(crate) fn redact(text: &str) -> String {
-    patterns()
-        .iter()
-        .fold(text.to_owned(), |value, (_, pattern)| {
-            pattern.replace_all(&value, "<redacted>").into_owned()
-        })
+    if contains_secret(text) {
+        "<redacted>".to_owned()
+    } else {
+        text.to_owned()
+    }
 }
 
 /// Marks entries containing secret patterns for removal, overriding any prior reason.

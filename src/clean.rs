@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 #[cfg(unix)]
@@ -88,24 +88,28 @@ pub fn run_cleanup(
     let total_lines = parsed.entries.len();
     let drop_set = removals_set(&removals);
 
-    if !dry_run && !removals.is_empty() {
-        ensure_lock_supported(paths)?;
-        if paths.history.exists() {
-            backup_history(paths)?;
-        }
-        ensure_lock_supported(paths)?;
-        write_history_atomically(&paths.history, &parsed.entries, &drop_set)?;
-        prune_old_backups(&paths.history, 5)?;
-    }
-
     if !dry_run {
         ensure_lock_supported(paths)?;
+        if !removals.is_empty() {
+            backup_history(paths)?;
+        }
+        let mut timestamp_counts: HashMap<&str, usize> = HashMap::new();
+        for entry in &parsed.entries {
+            if let Some(timestamp) = &entry.timestamp {
+                *timestamp_counts.entry(timestamp).or_default() += 1;
+            }
+        }
         let keep_ts: HashSet<String> = parsed
             .entries
             .iter()
             .enumerate()
             .filter_map(|(idx, e)| {
-                if drop_set.contains(&idx) {
+                if drop_set.contains(&idx)
+                    || e.timestamp
+                        .as_ref()
+                        .and_then(|ts| timestamp_counts.get(ts.as_str()))
+                        != Some(&1)
+                {
                     None
                 } else {
                     e.timestamp.clone()
@@ -113,6 +117,11 @@ pub fn run_cleanup(
             })
             .collect();
         compact_exits_file(&paths.exits, &keep_ts)?;
+        if !removals.is_empty() {
+            ensure_lock_supported(paths)?;
+            write_history_atomically(&paths.history, &parsed.entries, &drop_set)?;
+            prune_old_backups(&paths.history, 5)?;
+        }
     }
 
     Ok(CleanReport {

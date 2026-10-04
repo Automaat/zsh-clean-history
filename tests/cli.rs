@@ -61,6 +61,58 @@ fn detected_secret_stays_out_of_output_and_log() {
 }
 
 #[test]
+fn repeated_secret_in_reason_is_redacted() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    let secret = "abcdefgh";
+    fs::write(
+        home.join(".zsh_history"),
+        format!(
+            ": 1:0;echo token={secret} {secret}\n: 2:0;echo token={secret} {secret}\n: 3:0;echo\n"
+        ),
+    )
+    .unwrap();
+    fs::write(home.join(".zsh_history_exits"), "1:0\n2:0\n3:1\n").unwrap();
+
+    run(home, &["--dry-run", "--verbose"])
+        .success()
+        .stdout(predicates::str::contains(secret).not());
+    assert!(
+        !fs::read_to_string(home.join(".zsh_history_cleanup.log"))
+            .unwrap()
+            .contains(secret)
+    );
+    run(home, &["explain", "echo"])
+        .success()
+        .stdout(predicates::str::contains(secret).not());
+}
+
+#[test]
+fn cleanup_drops_exit_evidence_from_ambiguous_seconds() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    fs::write(
+        home.join(".zsh_history"),
+        ": 1:0;false\n: 1:0;pwd\n: 2:0;false\n",
+    )
+    .unwrap();
+    fs::write(home.join(".zsh_history_exits"), "1.100:1\n2.100:1\n").unwrap();
+
+    run(home, &["--quiet"]).success();
+    let history = fs::read_to_string(home.join(".zsh_history")).unwrap();
+    assert!(!history.contains(": 1:0;false"));
+    assert!(history.contains(": 1:0;pwd"));
+    assert!(
+        !fs::read_to_string(home.join(".zsh_history_exits"))
+            .unwrap()
+            .contains("1.100")
+    );
+    run(home, &["explain", "pwd"])
+        .success()
+        .stdout(predicates::str::contains("success=0 failed=0"));
+}
+
+#[test]
 fn invalid_utf8_does_not_rewrite_history() {
     let dir = tempdir().unwrap();
     let home = dir.path();
