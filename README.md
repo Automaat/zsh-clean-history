@@ -8,7 +8,7 @@ Smart zsh history cleanup. Removes typos, failed commands, and duplicates from `
 - Removes cross-base typos — e.g. `gti status` when `git` has ≥ 20 uses (base count ≤ 2, candidate count ≥ 20, DL distance 1)
 - Removes rare command variants similar to common ones
 - Deduplicates while keeping the most-recent occurrence (Ctrl-R-friendly)
-- Atomic writes with file locking — safe under concurrent shells
+- Atomic writes with a shared lock for plugin-enabled shells
 - Timestamped backup rotation, plus `clean-history-undo` to restore the latest
 - JSONL run log at `~/.zsh_history_cleanup.log`
 - Multi-line history entries handled correctly
@@ -50,13 +50,19 @@ echo 'source ~/.zsh-clean-history/zsh-clean-history.plugin.zsh' >> ~/.zshrc
 ```
 
 The plugin auto-finds the binary on `PATH`, or falls back to `target/release/zsh-clean-history` inside the plugin dir.
+It uses `SHARE_HISTORY` when enabled, otherwise `INC_APPEND_HISTORY`. Plugin-enabled
+shells coordinate writes with the cleaner through `~/.zsh_history.cleaner.lock`.
+If a shell cannot acquire that lock, it stores commands in a private
+`~/.zsh_history.cleaner.pending.<pid>` file and leaves a
+`~/.zsh_history.cleaner.lock-failed` marker. Cleanup stops. Recover the pending
+commands, close affected shells, fix the lock failure, then remove the marker.
 
 ## Commands
 
 | Command | Description |
 |---|---|
 | `clean-history` | Run cleanup |
-| `clean-history-stats` | Dry run (no writes) |
+| `clean-history-stats` | Preview removals (history unchanged; log written) |
 | `clean-history-undo` | Restore the most recent backup |
 | `clean-history-info` | Show config |
 | `clean-history-log [N]` | Summarize last N runs (`--full` for raw JSONL) |
@@ -64,8 +70,8 @@ The plugin auto-finds the binary on `PATH`, or falls back to `target/release/zsh
 ## Configuration
 
 ```bash
-# Auto-clean on shell exit (default: false); runs in background, non-blocking
-# Failures are logged to ~/.zsh_history_cleanup.log
+# Auto-clean after shell exit (default: false); runs in background
+# Failures are logged to ~/.zsh_history_cleanup.errors.log
 ZSH_CLEAN_HISTORY_AUTO_CLEAN=true
 
 # Similarity threshold 0..1 (default: 0.8)
@@ -92,7 +98,7 @@ zsh-clean-history record-exit <timestamp> <code>
 
 1. Plugin's `precmd` hook appends `<timestamp>:<exit-code>` to `~/.zsh_history_exits` for every command.
 2. On cleanup, `zsh-clean-history`:
-   - Locks `~/.zsh_history` (`flock`),
+   - Locks `~/.zsh_history.cleaner.lock` (compatible with the plugin's zsh lock),
    - Parses entries (multi-line aware) and joins with exit codes,
    - Identifies removals via four strategies:
      - **Duplicate** — keep newest occurrence,
@@ -103,6 +109,14 @@ zsh-clean-history record-exit <timestamp> <code>
    - Writes the cleaned history atomically (`tempfile` + `rename`),
    - Compacts `~/.zsh_history_exits` to drop entries for now-deleted commands.
 
+Exit status is used only when one history entry and one exit record share a
+timestamp second. Ambiguous seconds are left unclassified. Cleanup stops without
+writing if the history contains invalid UTF-8.
+
+Backups retain the original history, including commands removed for matching a
+secret pattern. They are created with `0600` permissions and rotated to five
+copies. Review or remove old backups separately when purging a secret.
+
 ## Cleanup log
 
 Each run appends one JSON line to `~/.zsh_history_cleanup.log` (chmod `0600`):
@@ -112,6 +126,9 @@ Each run appends one JSON line to `~/.zsh_history_cleanup.log` (chmod `0600`):
 ```
 
 `removals[].line` is the 0-based index in the parsed history.
+Detected secret values are redacted from commands and reasons before logging.
+`--dry-run` still logs its result; add `--no-log` to skip the log entry.
+Auto-clean errors use a separate private `~/.zsh_history_cleanup.errors.log` file.
 
 `clean-history-log` summarises recent runs; `clean-history-log --full` dumps raw JSONL. Pipe through `jq` for analytics.
 

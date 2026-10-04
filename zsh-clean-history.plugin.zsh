@@ -8,7 +8,9 @@ ZSH_CLEAN_HISTORY_DIR="${0:A:h}"
 : ${ZSH_CLEAN_HISTORY_RARE_THRESHOLD:=3}
 
 setopt EXTENDED_HISTORY
-setopt INC_APPEND_HISTORY
+if [[ ! -o SHARE_HISTORY ]]; then
+    setopt INC_APPEND_HISTORY
+fi
 
 _zsh_clean_history_resolve_bin() {
     if (( $+commands[$ZSH_CLEAN_HISTORY_BIN] )); then
@@ -29,7 +31,14 @@ _zsh_clean_history_resolve_bin() {
 }
 
 zmodload zsh/datetime 2>/dev/null
+typeset -g _zsh_clean_history_lock_supported=true
+zmodload zsh/system 2>/dev/null || _zsh_clean_history_lock_supported=false
 typeset -g _zsh_clean_history_exit_file="${HOME}/.zsh_history_exits"
+typeset -g _zsh_clean_history_lock_file="${HOME}/.zsh_history.cleaner.lock"
+typeset -g _zsh_clean_history_lock_failure_file="${HOME}/.zsh_history.cleaner.lock-failed"
+typeset -g _zsh_clean_history_pending_file="${HOME}/.zsh_history.cleaner.pending.$$"
+typeset -gi _zsh_clean_history_lock_fd=0
+typeset -g _zsh_clean_history_lock_failed=false
 typeset -g _zsh_clean_history_pending_ts=0
 typeset -gi _zsh_clean_history_pending_histcmd=0
 typeset -gi _zsh_clean_history_recorded_histcmd=0
@@ -42,12 +51,50 @@ else
     chmod 0600 "$_zsh_clean_history_exit_file" 2>/dev/null
 fi
 
+if [[ ! -f "$_zsh_clean_history_lock_file" ]]; then
+    (umask 0177 && : >>! "$_zsh_clean_history_lock_file") 2>/dev/null
+else
+    chmod 0600 "$_zsh_clean_history_lock_file" 2>/dev/null
+fi
+
+_zsh_clean_history_lock() {
+    (( _zsh_clean_history_lock_fd )) && return 0
+    [[ "$_zsh_clean_history_lock_supported" == true ]] || return 1
+    zsystem flock -f _zsh_clean_history_lock_fd "$_zsh_clean_history_lock_file"
+}
+
+_zsh_clean_history_unlock() {
+    (( _zsh_clean_history_lock_fd )) || return 0
+    zsystem flock -u "$_zsh_clean_history_lock_fd"
+    _zsh_clean_history_lock_fd=0
+}
+
+_zsh_clean_history_lock_or_warn() {
+    _zsh_clean_history_lock && return 0
+    if [[ "$_zsh_clean_history_lock_failed" == false ]]; then
+        (umask 0177 && : >>! "$_zsh_clean_history_lock_failure_file") 2>/dev/null
+        print -u2 -- "zsh-clean-history: lock unavailable; cleanup disabled until the lock issue is fixed"
+    fi
+    _zsh_clean_history_lock_failed=true
+    return 1
+}
+
+_zsh_clean_history_before_history() {
+    _zsh_clean_history_lock_or_warn && return 0
+    [[ ! -f "$_zsh_clean_history_pending_file" ]] || chmod 0600 "$_zsh_clean_history_pending_file" 2>/dev/null
+    if ! (umask 0177 && print -rn -- "$1" >>! "$_zsh_clean_history_pending_file"); then
+        print -u2 -- "zsh-clean-history: could not save pending command; kept in session history only"
+    fi
+    return 2
+}
+
 # preexec captures EPOCHREALTIME at command start, which matches the timestamp
 # zsh writes into HISTFILE for EXTENDED_HISTORY entries. Without this, long-
 # running commands (e.g. `sleep 60`) would record an end-time timestamp that
 # never matches the history entry. Microsecond precision reduces file-level
 # duplicate lines for commands run within the same second.
 _zsh_clean_history_record_start() {
+    _zsh_clean_history_unlock
     _zsh_clean_history_pending_ts=$EPOCHREALTIME
     _zsh_clean_history_pending_histcmd=$HISTCMD
 }
@@ -59,11 +106,16 @@ _zsh_clean_history_save_exit() {
     # precmd can fire without a new command (bare Enter, line-edit interrupt);
     # skip if we already recorded this HISTCMD.
     (( _zsh_clean_history_pending_histcmd == _zsh_clean_history_recorded_histcmd )) && return 0
+    _zsh_clean_history_lock_or_warn || return 0
     print -r -- "${_zsh_clean_history_pending_ts}:${code}" >>! "$_zsh_clean_history_exit_file"
+    local write_rc=$?
+    _zsh_clean_history_unlock
+    (( write_rc == 0 )) || return "$write_rc"
     _zsh_clean_history_recorded_histcmd=$_zsh_clean_history_pending_histcmd
 }
 
 autoload -Uz add-zsh-hook
+add-zsh-hook zshaddhistory _zsh_clean_history_before_history
 add-zsh-hook preexec _zsh_clean_history_record_start
 add-zsh-hook precmd _zsh_clean_history_save_exit
 
@@ -159,15 +211,25 @@ clean-history-log() {
 
 if [[ "$ZSH_CLEAN_HISTORY_AUTO_CLEAN" == "true" ]]; then
     _zsh_clean_history_exit() {
+        _zsh_clean_history_unlock
+        [[ "$_zsh_clean_history_lock_failed" == false ]] || return 0
+        local shell_pid=$$
         {
+            local attempts=0
+            while kill -0 "$shell_pid" 2>/dev/null && (( attempts < 100 )); do
+                sleep 0.05
+                (( attempts++ ))
+            done
             local out rc
             out=$(clean-history --quiet 2>&1)
             rc=$?
             if (( rc != 0 )); then
                 local ts
                 strftime -s ts '%Y-%m-%dT%H:%M:%SZ' $EPOCHSECONDS
-                printf '[%s] ERROR exit=%d %s\n' "$ts" "$rc" "$out" \
-                    >> "${HOME}/.zsh_history_cleanup.log"
+                local logfile="${HOME}/.zsh_history_cleanup.errors.log"
+                [[ ! -f "$logfile" ]] || chmod 0600 "$logfile" 2>/dev/null
+                (umask 0177 && printf '[%s] ERROR exit=%d %s\n' "$ts" "$rc" "$out" \
+                    >> "$logfile")
             fi
         } </dev/null &!
     }

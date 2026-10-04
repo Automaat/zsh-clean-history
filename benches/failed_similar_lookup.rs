@@ -11,22 +11,22 @@ use zsh_clean_history::{CleaningSettings, identify_removals, parse_history_text}
 fn gen_corpus(
     success_cmds: &[(&str, usize)],
     failed_cmds: &[(&str, usize)],
-) -> (String, HashMap<String, i32>) {
+) -> (String, HashMap<String, Vec<i32>>) {
     let mut text = String::new();
-    let mut exits: HashMap<String, i32> = HashMap::new();
+    let mut exits: HashMap<String, Vec<i32>> = HashMap::new();
     let mut ts = 1_000_000_000u64;
 
     for (cmd, count) in success_cmds {
         for _ in 0..*count {
             text.push_str(&format!(": {ts}:0;{cmd}\n"));
-            exits.insert(ts.to_string(), 0);
+            exits.insert(ts.to_string(), vec![0]);
             ts += 1;
         }
     }
     for (cmd, count) in failed_cmds {
         for _ in 0..*count {
             text.push_str(&format!(": {ts}:0;{cmd}\n"));
-            exits.insert(ts.to_string(), 1);
+            exits.insert(ts.to_string(), vec![1]);
             ts += 1;
         }
     }

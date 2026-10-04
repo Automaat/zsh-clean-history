@@ -50,6 +50,18 @@ fn patterns() -> &'static [(&'static str, Regex)] {
     })
 }
 
+pub fn contains_secret(text: &str) -> bool {
+    patterns().iter().any(|(_, pattern)| pattern.is_match(text))
+}
+
+pub(crate) fn redact(text: &str) -> String {
+    if contains_secret(text) {
+        "<redacted>".to_owned()
+    } else {
+        text.to_owned()
+    }
+}
+
 /// Marks entries containing secret patterns for removal, overriding any prior reason.
 pub(crate) fn mark_secrets(parsed: &ParsedHistory, removals: &mut HashMap<usize, Arc<str>>) {
     for (idx, entry) in parsed.entries.iter().enumerate() {
@@ -73,7 +85,7 @@ mod tests {
     fn parse(text: &str, exits: &[(&str, i32)]) -> ParsedHistory {
         let map = exits
             .iter()
-            .map(|(ts, c)| ((*ts).to_string(), *c))
+            .map(|(ts, c)| ((*ts).to_string(), vec![*c]))
             .collect();
         parse_history_text(text, &map)
     }

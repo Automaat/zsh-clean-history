@@ -2,45 +2,47 @@ use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::SecondsFormat;
 use serde::Serialize;
 
+use crate::clean::LockedHistory;
 use crate::cleaner::Removal;
+use crate::secrets::{contains_secret, redact};
 use crate::settings::CleaningSettings;
 
 pub const DEFAULT_LOG_MAX_BYTES: u64 = 1024 * 1024;
 
 #[derive(Serialize)]
-struct LogEntry<'a> {
+struct LogEntry {
     timestamp: String,
     dry_run: bool,
     settings: SettingsView,
     total_lines: usize,
     removed_count: usize,
     reason_counts: BTreeMap<String, usize>,
-    removals: Vec<LogRemoval<'a>>,
+    removals: Vec<LogRemoval>,
 }
 
 #[derive(Serialize)]
-struct LogRemoval<'a> {
+struct LogRemoval {
     line: usize,
-    reason: &'a str,
-    command: &'a str,
+    reason: String,
+    command: String,
 }
 
-impl<'a> LogRemoval<'a> {
-    fn from_removal(r: &'a Removal) -> Self {
+impl LogRemoval {
+    fn from_removal(r: &Removal) -> Self {
         Self {
             line: r.line,
-            reason: &*r.reason,
-            command: if r.reason.starts_with("Secret pattern:") {
-                "<redacted>"
+            reason: redact(&r.reason),
+            command: if contains_secret(&r.command) {
+                "<redacted>".to_owned()
             } else {
-                &r.command
+                r.command.clone()
             },
         }
     }
@@ -61,9 +63,10 @@ pub fn write_log_entry(
     removals: &[Removal],
     max_bytes: u64,
 ) -> Result<()> {
+    let _lock = LockedHistory::acquire(&log_path.with_extension("log.lock"))?;
     let mut reason_counts: BTreeMap<String, usize> = BTreeMap::new();
     for r in removals {
-        *reason_counts.entry(r.reason.clone()).or_default() += 1;
+        *reason_counts.entry(redact(&r.reason)).or_default() += 1;
     }
 
     let entry = LogEntry {
@@ -88,6 +91,12 @@ pub fn write_log_entry(
         }
     }
 
+    #[cfg(unix)]
+    if log_path.exists() {
+        fs::set_permissions(log_path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("secure log {}", log_path.display()))?;
+    }
+
     if max_bytes > 0
         && log_path
             .metadata()
@@ -103,20 +112,12 @@ pub fn write_log_entry(
         fs::rename(log_path, &rotated)?;
     }
 
-    let first_create = !log_path.exists();
-    let mut f = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)?;
-    f.write_all(json.as_bytes())?;
-    f.write_all(b"\n")?;
-
-    if first_create {
-        #[cfg(unix)]
-        {
-            let _ = fs::set_permissions(log_path, fs::Permissions::from_mode(0o600));
-        }
-    }
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut f = options.open(log_path)?;
+    f.write_all(format!("{json}\n").as_bytes())?;
     Ok(())
 }
 

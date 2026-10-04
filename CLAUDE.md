@@ -23,9 +23,9 @@ writes atomically and logs via `log.rs`.
 
 ## Tech Stack
 
-Rust edition 2024, MSRV 1.85 (`.mise.toml` pins toolchain 1.95.0). Key deps with
-non-obvious roles: `strsim`/`bk-tree` (typo detection), `tempfile`/`fs2` (atomic
-writes + locking), `anyhow` (errors), `proptest` (property tests). CI runs
+Rust edition 2024, MSRV 1.85 (`.mise.toml` pins toolchain 1.97.0). Key deps with
+non-obvious roles: `strsim`/`bk-tree` (typo detection), `tempfile` (atomic
+writes), `libc`/`fs2` (Unix/other locking), `anyhow` (errors), `proptest` (property tests). CI runs
 `check.yml` (fmt, clippy, test, `zsh -n`, actionlint) and `audit.yml` (RustSec).
 
 ## Common Commands
@@ -71,8 +71,8 @@ History-file manipulation can lose user data. These are non-negotiable:
   as the target so the rename is atomic on one filesystem.
 - **Backup before modify.** Create a timestamped backup (`Paths::backup_for`) before
   any write to `~/.zsh_history`.
-- **Lock before touch.** Acquire the file lock (`Paths::lock_file`, `fs2`) before any
-  history read/write — concurrent shells run this tool.
+- **Lock before touch.** Acquire `Paths::lock_file` before history/exit reads and
+  writes. The plugin holds the same lock while zsh writes history.
 - **Permissions 0o600.** History, exits, log, and backup files must not be
   world-readable.
 - **Redact before logging.** Run `secrets` redaction on command text *before* it is

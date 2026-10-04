@@ -7,7 +7,7 @@ use regex::RegexSet;
 use serde::Serialize;
 
 use crate::history::ParsedHistory;
-use crate::secrets::mark_secrets;
+use crate::secrets::{mark_secrets, redact};
 use crate::settings::CleaningSettings;
 use crate::similarity::{
     DamerauLevenshteinMetric, base_command, bases_within_dl1, bk_radius, command_similar,
@@ -132,7 +132,7 @@ fn failed_similar_to_successful(
                 .unwrap_or(0);
             if success_count > fail_count {
                 chosen = Some(Arc::from(
-                    format!("Failed prefix of '{success_cmd}'").as_str(),
+                    format!("Failed prefix of '{}'", redact(success_cmd)).as_str(),
                 ));
                 break 'prefix;
             }
@@ -155,7 +155,7 @@ fn failed_similar_to_successful(
                 }
                 if command_similar(failed_cmd, success_cmd, settings.similarity_threshold) {
                     chosen = Some(Arc::from(
-                        format!("Failed similar to '{success_cmd}'").as_str(),
+                        format!("Failed similar to '{}'", redact(success_cmd)).as_str(),
                     ));
                     break;
                 }
@@ -211,7 +211,8 @@ fn cross_base_typos(parsed: &ParsedHistory, removals: &mut HashMap<usize, Arc<st
 
     for rare in rare_bases {
         if let Some((common, _)) = common_bases.iter().find(|(c, _)| bases_within_dl1(rare, c)) {
-            let reason: Arc<str> = Arc::from(format!("Cross-base typo of '{common}'").as_str());
+            let reason: Arc<str> =
+                Arc::from(format!("Cross-base typo of '{}'", redact(common)).as_str());
             for (cmd, idxs) in &parsed.cmd_to_lines {
                 if base_command(cmd) == rare {
                     // Only remove if this specific command has no successful runs —
@@ -286,7 +287,7 @@ fn rare_variants(
             if command_similar(rare_cmd, common_cmd, settings.similarity_threshold) {
                 if let Some(indices) = parsed.cmd_to_lines.get(rare_cmd) {
                     let reason: Arc<str> =
-                        Arc::from(format!("Rare variant of '{common_cmd}'").as_str());
+                        Arc::from(format!("Rare variant of '{}'", redact(common_cmd)).as_str());
                     for &idx in indices {
                         removals.entry(idx).or_insert_with(|| Arc::clone(&reason));
                     }
@@ -320,7 +321,7 @@ mod tests {
     fn parse_with_exits(text: &str, exits: &[(&str, i32)]) -> ParsedHistory {
         let map = exits
             .iter()
-            .map(|(ts, c)| ((*ts).to_string(), *c))
+            .map(|(ts, c)| ((*ts).to_string(), vec![*c]))
             .collect();
         parse_history_text(text, &map)
     }

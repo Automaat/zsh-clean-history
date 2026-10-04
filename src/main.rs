@@ -1,15 +1,12 @@
-use std::collections::{BTreeMap, HashMap};
-use std::fs;
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::collections::{BTreeMap, HashMap};
 use zsh_clean_history::allowlist::load_allowlist;
-use zsh_clean_history::clean::{LockedHistory, run_cleanup};
+use zsh_clean_history::clean::{LockedHistory, restore_latest_backup, run_cleanup};
 use zsh_clean_history::cleaner::Removal;
 use zsh_clean_history::{
-    CleaningSettings, Paths, identify_removals, load_exit_codes, parse_history_file,
-    write_log_entry,
+    CleaningSettings, Paths, contains_secret, identify_removals, load_exit_codes,
+    parse_history_file, write_log_entry,
 };
 
 include!("cli_definition.rs");
@@ -29,7 +26,10 @@ fn main() -> Result<()> {
         Some(Cmd::RecordExit {
             timestamp,
             exit_code,
-        }) => zsh_clean_history::exits::append_exit(&paths.exits, &timestamp, exit_code),
+        }) => {
+            let _lock = LockedHistory::acquire(&paths.lock_file())?;
+            zsh_clean_history::exits::append_exit(&paths.exits, &timestamp, exit_code)
+        }
         Some(Cmd::Explain { ref command }) => explain(command, &cli, &paths),
         None => do_cleanup(&cli, &paths),
     }
@@ -85,7 +85,11 @@ fn do_cleanup(cli: &Cli, paths: &Paths) -> Result<()> {
                         .filter(|r| &*r.reason == *reason)
                         .take(5)
                     {
-                        println!("    {}", truncate_cmd(&sample.command, 70));
+                        if contains_secret(&sample.command) {
+                            println!("    <redacted>");
+                        } else {
+                            println!("    {}", truncate_cmd(&sample.command, 70));
+                        }
                     }
                 }
             }
@@ -112,10 +116,21 @@ fn explain(command: &str, cli: &Cli, paths: &Paths) -> Result<()> {
         .unwrap_or_default();
 
     if indices.is_empty() {
-        anyhow::bail!("command not found in history: {command}");
+        anyhow::bail!(
+            "command not found in history: {}",
+            if contains_secret(command) {
+                "<redacted>"
+            } else {
+                command
+            }
+        );
     }
 
-    println!("command:  {command}");
+    if contains_secret(command) {
+        println!("command:  <redacted>");
+    } else {
+        println!("command:  {command}");
+    }
     println!("runs:     success={success_count} failed={fail_count}");
     println!("entries:  {}", indices.len());
 
@@ -145,39 +160,7 @@ fn truncate_cmd(cmd: &str, max_chars: usize) -> String {
 }
 
 fn undo(paths: &Paths) -> Result<()> {
-    let _lock = LockedHistory::acquire(&paths.lock_file())?;
-    let parent = paths
-        .history
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-    let prefix = format!(
-        "{}.backup-",
-        paths
-            .history
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(".zsh_history")
-    );
-    let mut backups: Vec<PathBuf> = Vec::new();
-    for entry in fs::read_dir(&parent)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .map(|n| n.starts_with(&prefix))
-            .unwrap_or(false)
-        {
-            backups.push(path);
-        }
-    }
-    backups.sort();
-    let latest = backups
-        .last()
-        .context("no backup files found to restore from")?
-        .clone();
-    fs::copy(&latest, &paths.history)?;
+    let latest = restore_latest_backup(paths)?;
     println!(
         "Restored {} from {}",
         paths.history.display(),
