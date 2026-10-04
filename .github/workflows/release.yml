@@ -226,7 +226,6 @@ jobs:
           class ZshCleanHistory < Formula
             desc "Smart zsh history cleanup: removes typos and failed commands"
             homepage "https://github.com/Automaat/zsh-clean-history"
-            version "@VERSION@"
             license "MIT"
 
             on_macos do
