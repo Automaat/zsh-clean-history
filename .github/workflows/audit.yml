@@ -29,7 +29,7 @@ jobs:
     - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
       env:
         GITHUB_TOKEN: ${{ github.token }}
-    - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+    - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
       with:
         tool: cargo-audit
     - name: cargo audit
