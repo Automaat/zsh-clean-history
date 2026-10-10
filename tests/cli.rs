@@ -2,6 +2,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command as ProcessCommand;
+use std::time::Duration;
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
@@ -171,6 +172,58 @@ fn zsh_and_cleaner_use_the_same_lock() {
     assert!(!attempt().success());
     drop(guard);
     assert!(attempt().success());
+}
+
+#[cfg(unix)]
+#[test]
+fn canceled_input_releases_history_lock_at_prompt() {
+    let dir = tempdir().unwrap();
+    let script = format!(
+        "source '{}'; _zsh_clean_history_before_history 'echo canceled\\n'; \
+         zsh -fc 'zmodload zsh/system; zsystem flock -t 0 -f fd \"$HOME/.zsh_history.cleaner.lock\"' 2>/dev/null && exit 1; \
+         _zsh_clean_history_save_exit; \
+         zsh -fc 'zmodload zsh/system; zsystem flock -t 0 -f fd \"$HOME/.zsh_history.cleaner.lock\"'",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/zsh-clean-history.plugin.zsh")
+    );
+    let output = ProcessCommand::new("zsh")
+        .args(["-fc", &script])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!dir.path().join(".zsh_history.cleaner.lock-failed").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn blocked_history_lock_does_not_hang_commands() {
+    let dir = tempdir().unwrap();
+    let lock_path = dir.path().join(".zsh_history.cleaner.lock");
+    let _guard = LockedHistory::acquire(&lock_path).unwrap();
+    let script = format!(
+        "source '{}'; _zsh_clean_history_before_history 'echo saved\\n'; [[ $? == 2 ]]",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/zsh-clean-history.plugin.zsh")
+    );
+    Command::new("zsh")
+        .args(["-fc", &script])
+        .env("HOME", dir.path())
+        .timeout(Duration::from_secs(5))
+        .assert()
+        .success();
+    assert!(dir.path().join(".zsh_history.cleaner.lock-failed").exists());
+    assert!(
+        fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".cleaner.pending."))
+    );
 }
 
 #[test]
