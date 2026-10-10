@@ -60,7 +60,7 @@ fi
 _zsh_clean_history_lock() {
     (( _zsh_clean_history_lock_fd )) && return 0
     [[ "$_zsh_clean_history_lock_supported" == true ]] || return 1
-    zsystem flock -f _zsh_clean_history_lock_fd "$_zsh_clean_history_lock_file"
+    zsystem flock -t 2 -i 0.1 -f _zsh_clean_history_lock_fd "$_zsh_clean_history_lock_file"
 }
 
 _zsh_clean_history_unlock() {
@@ -101,6 +101,8 @@ _zsh_clean_history_record_start() {
 
 _zsh_clean_history_save_exit() {
     local code=$?
+    # A canceled input line can reach precmd without preexec.
+    _zsh_clean_history_unlock
     # No command pending (initial prompt before first command runs)
     (( _zsh_clean_history_pending_histcmd == 0 )) && return 0
     # precmd can fire without a new command (bare Enter, line-edit interrupt);
